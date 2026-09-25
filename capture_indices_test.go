@@ -201,6 +201,80 @@ func TestFindRunesCaptureIndicesStartingAtNoMatchAndDstReuse(t *testing.T) {
 	}
 }
 
+func TestFindRunesCaptureIndicesStartingAtBeforeKeepsFullInput(t *testing.T) {
+	tests := []struct {
+		name, pattern, input string
+		startAt, before      int
+		want                 CaptureIndex
+	}{
+		{
+			name: "consumes beyond bound", pattern: `(a.*z)`, input: "xa---z",
+			startAt: 0, before: 2, want: CaptureIndex{GroupNumber: 0, RuneIndex: 1, RuneLength: 5},
+		},
+		{
+			name: "lookahead reads beyond bound", pattern: `a(?=---z)`, input: "xa---z",
+			startAt: 0, before: 2, want: CaptureIndex{GroupNumber: 0, RuneIndex: 1, RuneLength: 1},
+		},
+		{
+			name: "unicode lookbehind", pattern: `(?<=界)b`, input: "é界b",
+			startAt: 0, before: 3, want: CaptureIndex{GroupNumber: 0, RuneIndex: 2, RuneLength: 1},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			re := MustCompile(tc.pattern)
+			got, err := re.FindRunesCaptureIndicesStartingAtBefore([]rune(tc.input), tc.startAt, tc.before, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(got) == 0 || got[0] != tc.want {
+				t.Fatalf("capture zero = %#v, want %#v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestFindRunesCaptureIndicesStartingAtBeforeMatchesUnboundedProperty(t *testing.T) {
+	patterns := []string{
+		`needle`, `(a.*z)`, `a(?=---z)`, `(?<=界)b`, `$`, `^`, `\Gfoo`, `(a)\1`, `(?:foo|bar)`,
+	}
+	inputs := []string{"", "needle", "xxneedle", "xa---z", "é界b", "foo", "xxfoo", "aa", "xxbar"}
+	for _, pattern := range patterns {
+		re := MustCompile(pattern, OptionMaintainCaptureOrder())
+		for _, inputString := range inputs {
+			input := []rune(inputString)
+			for startAt := 0; startAt <= len(input); startAt++ {
+				unbounded, err := re.FindRunesCaptureIndicesStartingAt(input, startAt, nil)
+				if err != nil {
+					t.Fatalf("unbounded %q on %q at %d: %v", pattern, inputString, startAt, err)
+				}
+				for before := 0; before <= len(input)+1; before++ {
+					got, err := re.FindRunesCaptureIndicesStartingAtBefore(input, startAt, before, nil)
+					if err != nil {
+						t.Fatalf("bounded %q on %q at %d before %d: %v", pattern, inputString, startAt, before, err)
+					}
+					var want []CaptureIndex
+					if len(unbounded) != 0 && unbounded[0].RuneIndex < before {
+						want = unbounded
+					}
+					if !reflect.DeepEqual(got, want) {
+						t.Fatalf("%q on %q at %d before %d = %#v, want %#v", pattern, inputString, startAt, before, got, want)
+					}
+				}
+			}
+		}
+	}
+}
+
+func TestFindRunesCaptureIndicesStartingAtBeforeRejectsInvalidBounds(t *testing.T) {
+	if got, err := MustCompile(`a`).FindRunesCaptureIndicesStartingAtBefore([]rune("a"), 0, -1, nil); err == nil || got != nil {
+		t.Fatalf("negative bound = (%#v, %v), want nil and error", got, err)
+	}
+	if got, err := MustCompile(`a`, RightToLeft).FindRunesCaptureIndicesStartingAtBefore([]rune("a"), 1, 1, nil); err == nil || got != nil {
+		t.Fatalf("right-to-left bound = (%#v, %v), want nil and error", got, err)
+	}
+}
+
 func TestFindRunesCaptureIndicesStartingAtTimeout(t *testing.T) {
 	re := MustCompile(`(.+)*\?`)
 	re.MatchTimeout = -time.Millisecond
@@ -302,6 +376,17 @@ func TestFindRunesCaptureIndicesStartingAtRegisteredEngineUsesFullCaptures(t *te
 	}
 	if fullCalls != 1 || quickCalls != 0 {
 		t.Fatalf("full/quick calls = %d/%d, want 1/0", fullCalls, quickCalls)
+	}
+	boundedOut, err := re.FindRunesCaptureIndicesStartingAtBefore([]rune("ab"), 0, 0, nil)
+	if err != nil || boundedOut != nil {
+		t.Fatalf("excluded registered-engine match = (%#v, %v), want nil", boundedOut, err)
+	}
+	boundedIn, err := re.FindRunesCaptureIndicesStartingAtBefore([]rune("ab"), 0, 1, nil)
+	if err != nil || !reflect.DeepEqual(boundedIn, want) {
+		t.Fatalf("included registered-engine match = (%#v, %v), want %#v", boundedIn, err, want)
+	}
+	if fullCalls != 2 || quickCalls != 0 {
+		t.Fatalf("bounded full/quick calls = %d/%d, want 2/0", fullCalls, quickCalls)
 	}
 }
 

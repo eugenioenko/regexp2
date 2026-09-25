@@ -115,13 +115,13 @@ func (r *Runner) scan(rt []rune, textInfo *matchText, textstart, candidate, prev
 	if quick {
 		mode = scanQuick
 	}
-	return r.scanWithMode(rt, textInfo, textstart, candidate, previousMatchLength, mode, timeout)
+	return r.scanWithMode(rt, textInfo, textstart, candidate, previousMatchLength, -1, mode, timeout)
 }
 
 // scanWithMode separates bool-only execution from capture-index execution. Both
 // keep the Match on the runner, but only bool-only execution may use quick code
 // with unobservable captures removed.
-func (r *Runner) scanWithMode(rt []rune, textInfo *matchText, textstart, candidate, previousMatchLength int, mode scanMode, timeout time.Duration) (*Match, error) {
+func (r *Runner) scanWithMode(rt []rune, textInfo *matchText, textstart, candidate, previousMatchLength, maxStartExclusive int, mode scanMode, timeout time.Duration) (*Match, error) {
 	r.timeout = timeout
 	r.ignoreTimeout = (time.Duration(math.MaxInt64) == timeout)
 	r.debug = r.re.Debug()
@@ -174,6 +174,13 @@ func (r *Runner) scanWithMode(rt []rune, textInfo *matchText, textstart, candida
 
 	r.startTimeoutWatch()
 	for {
+		// A match may consume or inspect text beyond maxStartExclusive; only its
+		// candidate start is bounded. Keep Runtextend at the real input end so
+		// lookahead and ordinary consuming matches retain their normal semantics.
+		if maxStartExclusive >= 0 && r.Runtextpos >= maxStartExclusive {
+			r.tidyMatch(true)
+			return nil, nil
+		}
 		if minRequiredLength > 0 {
 			if r.code.RightToLeft {
 				if r.Runtextpos < minRequiredLength {
@@ -193,6 +200,12 @@ func (r *Runner) scanWithMode(rt []rune, textInfo *matchText, textstart, candida
 		}
 
 		if findFirstChar(r) {
+			// Optimized finders may jump directly to a literal or character-set
+			// candidate beyond the requested range.
+			if maxStartExclusive >= 0 && r.Runtextpos >= maxStartExclusive {
+				r.tidyMatch(true)
+				return nil, nil
+			}
 			if !r.ignoreTimeout {
 				if err := r.CheckTimeout(); err != nil {
 					return nil, err

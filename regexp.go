@@ -296,6 +296,29 @@ func (re *Regexp) FindRunesMatchStartingAt(r []rune, startAt int) (*Match, error
 // storage. dst is reused when it has enough capacity. On no match or error, the
 // returned slice has length zero; in particular, a nil dst stays nil on no match.
 func (re *Regexp) FindRunesCaptureIndicesStartingAt(r []rune, startAt int, dst []CaptureIndex) ([]CaptureIndex, error) {
+	return re.findRunesCaptureIndicesStartingAtBefore(r, startAt, -1, dst)
+}
+
+// FindRunesCaptureIndicesStartingAtBefore searches r beginning at startAt but
+// only considers matches whose start is less than maxStartExclusive. A match
+// may inspect or consume input at and beyond maxStartExclusive. It otherwise
+// has the same result and destination-reuse semantics as
+// FindRunesCaptureIndicesStartingAt.
+//
+// This operation is defined for left-to-right regexps. Right-to-left regexps
+// return an error because their scan candidate is a match end, not a match
+// start, so the bound cannot be applied without changing its meaning.
+func (re *Regexp) FindRunesCaptureIndicesStartingAtBefore(r []rune, startAt, maxStartExclusive int, dst []CaptureIndex) ([]CaptureIndex, error) {
+	if re.RightToLeft() {
+		return dst[:0], errors.New("regexp2: match-start bounds are not supported for right-to-left regexps")
+	}
+	if maxStartExclusive < 0 {
+		return dst[:0], errors.New("regexp2: maxStartExclusive must be non-negative")
+	}
+	return re.findRunesCaptureIndicesStartingAtBefore(r, startAt, maxStartExclusive, dst)
+}
+
+func (re *Regexp) findRunesCaptureIndicesStartingAtBefore(r []rune, startAt, maxStartExclusive int, dst []CaptureIndex) ([]CaptureIndex, error) {
 	runner := re.getRunner()
 	defer re.putRunner(runner)
 
@@ -310,9 +333,14 @@ func (re *Regexp) FindRunesCaptureIndicesStartingAt(r []rune, startAt int, dst [
 	// Capture-index scans need the full program, not quickCode, because quick
 	// programs are allowed to remove otherwise unobservable capture operations.
 	runner.code = re.code
-	m, err := runner.scanWithMode(r, nil, startAt, startAt, -1, scanCaptureIndices, re.MatchTimeout)
+	m, err := runner.scanWithMode(r, nil, startAt, startAt, -1, maxStartExclusive, scanCaptureIndices, re.MatchTimeout)
 	if err != nil || m == nil {
 		return dst[:0], err
+	}
+	// The runner's candidate position is normally group zero's start. Keep the
+	// public contract defensive against custom registered engines that move it.
+	if maxStartExclusive >= 0 && m.matchIndex(0) >= maxStartExclusive {
+		return dst[:0], nil
 	}
 	m.tidyCaptureData()
 
