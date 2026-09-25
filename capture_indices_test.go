@@ -264,6 +264,47 @@ func TestFindRunesCaptureIndicesStartingAtConcurrent(t *testing.T) {
 	}
 }
 
+func TestFindRunesCaptureIndicesStartingAtRegisteredEngineUsesFullCaptures(t *testing.T) {
+	const pattern = "capture-index-registered-engine"
+	fullCalls := 0
+	quickCalls := 0
+	RegisterEngine(pattern, RuntimeEngineData{
+		CapSize: 3,
+		FindFirstChar: func(r *Runner) bool {
+			return r.Runtextpos == 0
+		},
+		Execute: func(r *Runner) error {
+			fullCalls++
+			r.Capture(1, 0, 1)
+			r.Capture(2, 1, 2)
+			r.Capture(0, 0, 2)
+			return nil
+		},
+		ExecuteQuick: func(r *Runner) error {
+			quickCalls++
+			r.Capture(0, 0, 2)
+			return nil
+		},
+	}, OptionMaintainCaptureOrder())
+
+	re := MustCompile(pattern, OptionMaintainCaptureOrder())
+	got, err := re.FindRunesCaptureIndicesStartingAt([]rune("ab"), 0, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []CaptureIndex{
+		{GroupNumber: 0, RuneIndex: 0, RuneLength: 2},
+		{GroupNumber: 1, RuneIndex: 0, RuneLength: 1},
+		{GroupNumber: 2, RuneIndex: 1, RuneLength: 1},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("capture indexes = %#v, want %#v", got, want)
+	}
+	if fullCalls != 1 || quickCalls != 0 {
+		t.Fatalf("full/quick calls = %d/%d, want 1/0", fullCalls, quickCalls)
+	}
+}
+
 func publicCaptureIndices(re *Regexp, match *Match) []CaptureIndex {
 	if match == nil {
 		return nil
