@@ -52,6 +52,15 @@ type Capture struct {
 	RuneLength int
 }
 
+// CaptureIndex identifies the last capture of a numbered group without
+// retaining the input text. Capture indexes and lengths are measured in runes.
+// RuneIndex is -1 when the group did not participate in the match.
+type CaptureIndex struct {
+	GroupNumber int
+	RuneIndex   int
+	RuneLength  int
+}
+
 type matchText struct {
 	runes            []rune
 	input            string
@@ -223,7 +232,6 @@ func (m *Match) reset(text *matchText, textstart int) {
 }
 
 func (m *Match) tidy(textpos int) {
-
 	interval := m.matches[0]
 	setCaptureFields(&m.Capture, interval[0], interval[1])
 	m.textpos = textpos
@@ -233,7 +241,13 @@ func (m *Match) tidy(textpos int) {
 	if m.text != nil && m.text.hasStringInput {
 		m.text.ensureByteOffsets()
 	}
+	m.tidyCaptureData()
+}
 
+// tidyCaptureData compacts captures removed by balancing groups. It deliberately
+// does not construct public Group or Capture values, so callers that only need
+// indexes can copy those indexes directly out of the runner-owned Match.
+func (m *Match) tidyCaptureData() {
 	if m.balancing {
 		// The idea here is that we want to compact all of our unbalanced captures.  To do that we
 		// use j basically as a count of how many unbalanced captures we have at any given time

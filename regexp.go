@@ -287,6 +287,57 @@ func (re *Regexp) FindRunesMatchStartingAt(r []rune, startAt int) (*Match, error
 	return re.run(false, startAt, -1, r, newMatchText(r))
 }
 
+// FindRunesCaptureIndicesStartingAt searches r beginning at startAt and returns
+// the last capture of every numbered group, including group 0. Results have the
+// same group-slot order as Match.Groups and GetGroupNumbers. Groups that did not
+// participate have RuneIndex -1 and RuneLength 0.
+//
+// The returned slice is owned by the caller and never aliases runner-pooled
+// storage. dst is reused when it has enough capacity. On no match or error, the
+// returned slice has length zero; in particular, a nil dst stays nil on no match.
+func (re *Regexp) FindRunesCaptureIndicesStartingAt(r []rune, startAt int, dst []CaptureIndex) ([]CaptureIndex, error) {
+	runner := re.getRunner()
+	defer re.putRunner(runner)
+
+	if startAt < 0 {
+		if re.RightToLeft() {
+			startAt = len(r)
+		} else {
+			startAt = 0
+		}
+	}
+
+	// Capture-index scans need the full program, not quickCode, because quick
+	// programs are allowed to remove otherwise unobservable capture operations.
+	runner.code = re.code
+	m, err := runner.scanWithMode(r, nil, startAt, startAt, -1, scanCaptureIndices, re.MatchTimeout)
+	if err != nil || m == nil {
+		return dst[:0], err
+	}
+	m.tidyCaptureData()
+
+	if cap(dst) < re.capsize {
+		dst = make([]CaptureIndex, re.capsize)
+	} else {
+		dst = dst[:re.capsize]
+	}
+	for i := range dst {
+		dst[i] = CaptureIndex{
+			GroupNumber: i,
+			RuneIndex:   -1,
+		}
+		if m.isMatched(i) {
+			dst[i].RuneIndex = m.matchIndex(i)
+			dst[i].RuneLength = m.matchLength(i)
+		}
+	}
+	for groupNumber, slot := range re.caps {
+		dst[slot].GroupNumber = groupNumber
+	}
+
+	return dst, nil
+}
+
 // FindAllStringIndex returns a slice of byte index pairs identifying all
 // successive matches in s.
 func (re *Regexp) FindAllStringIndex(s string, n int) ([][]int, error) {

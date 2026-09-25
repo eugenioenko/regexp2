@@ -72,6 +72,14 @@ type Runner struct {
 	codepos  int
 }
 
+type scanMode uint8
+
+const (
+	scanFull scanMode = iota
+	scanQuick
+	scanCaptureIndices
+)
+
 // run searches for matches and can continue from the previous match.
 //
 // quick is usually false, but can be true to not return matches, just put it in caches.
@@ -100,8 +108,20 @@ func (re *Regexp) run(quick bool, textstart, previousMatchLength int, input []ru
 }
 
 // scan starts at candidate while preserving textstart for \G. Both are rune
-// indexes in rt. A nil textInfo allows quick scans to omit capture metadata.
+// indexes in rt. A nil textInfo allows bool-only quick scans to omit capture
+// metadata.
 func (r *Runner) scan(rt []rune, textInfo *matchText, textstart, candidate, previousMatchLength int, quick bool, timeout time.Duration) (*Match, error) {
+	mode := scanFull
+	if quick {
+		mode = scanQuick
+	}
+	return r.scanWithMode(rt, textInfo, textstart, candidate, previousMatchLength, mode, timeout)
+}
+
+// scanWithMode separates bool-only execution from capture-index execution. Both
+// keep the Match on the runner, but only bool-only execution may use quick code
+// with unobservable captures removed.
+func (r *Runner) scanWithMode(rt []rune, textInfo *matchText, textstart, candidate, previousMatchLength int, mode scanMode, timeout time.Duration) (*Match, error) {
 	r.timeout = timeout
 	r.ignoreTimeout = (time.Duration(math.MaxInt64) == timeout)
 	r.debug = r.re.Debug()
@@ -125,7 +145,7 @@ func (r *Runner) scan(rt []rune, textInfo *matchText, textstart, candidate, prev
 	// setup our scanner functions
 	findFirstChar := r.re.findFirstChar
 	execute := r.re.execute
-	if quick && textInfo == nil && r.re.executeQuick != nil {
+	if mode == scanQuick && textInfo == nil && r.re.executeQuick != nil {
 		execute = r.re.executeQuick
 	}
 	if findFirstChar == nil {
@@ -189,7 +209,7 @@ func (r *Runner) scan(rt []rune, textInfo *matchText, textstart, candidate, prev
 
 			if r.runmatch.matchcount[0] > 0 {
 				// We'll return a match even if it touches a previous empty match
-				return r.tidyMatch(quick), nil
+				return r.tidyMatch(mode != scanFull), nil
 			}
 
 			// reset state for another go
