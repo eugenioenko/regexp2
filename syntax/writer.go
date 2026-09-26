@@ -217,6 +217,7 @@ func (w *writer) codeFromTree(tree *RegexTree) (*Code, error) {
 		FindOptimizations: tree.FindOptimizations,
 		LeftContextRunes:  AnalyzeLeftContext(tree.Root),
 		RequiredRunes:     AnalyzeRequiredRunes(tree),
+		LeadingFilter:     leadingFilterFor(tree),
 	}, nil
 }
 

@@ -182,8 +182,25 @@ func (r *Runner) scanWithMode(rt []rune, textInfo *matchText, textstart, candida
 		}
 	}
 
+	var leadingFilter *syntax.LeadingFilter
+	if r.code != nil && !r.code.RightToLeft {
+		leadingFilter = r.code.LeadingFilter
+	}
+
 	r.startTimeoutWatch()
 	for {
+		if leadingFilter != nil {
+			end := r.Runtextend
+			if maxStartExclusive >= 0 && maxStartExclusive < end {
+				end = maxStartExclusive
+			}
+			next := leadingFilter.IndexFrom(rt, r.Runtextpos, end)
+			if next < 0 {
+				r.tidyMatch(true)
+				return nil, nil
+			}
+			r.Runtextpos = next
+		}
 		// A match may consume or inspect text beyond maxStartExclusive; only its
 		// candidate start is bounded. Keep Runtextend at the real input end so
 		// lookahead and ordinary consuming matches retain their normal semantics.

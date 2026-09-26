@@ -130,6 +130,8 @@ type Code struct {
 	// RequiredRunes holds runes of which every match contains at least one at
 	// or after its start. A match therefore cannot start after the last one.
 	RequiredRunes *RequiredRunes
+	// LeadingFilter is set only when FindOptimizations has no search strategy.
+	LeadingFilter *LeadingFilter
 }
 
 // DispatchTable maps disjoint character sets to branch indices. Larger tables
