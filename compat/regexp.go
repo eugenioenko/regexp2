@@ -6,7 +6,7 @@ import (
 	"io"
 	"unicode/utf8"
 
-	regexp2 "github.com/dlclark/regexp2/v2"
+	regexp2 "github.com/eugenioenko/regexp2/v2"
 )
 
 // Regexp adapts a regexp2.Regexp to the matching method signatures of

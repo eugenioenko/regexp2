@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	regexp2 "github.com/dlclark/regexp2/v2"
+	regexp2 "github.com/eugenioenko/regexp2/v2"
 )
 
 func TestRegexpMethodsMatchStdlib(t *testing.T) {

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"github.com/dlclark/regexp2/v2/helpers"
+	"github.com/eugenioenko/regexp2/v2/helpers"
 )
 
 func TestCompileEqualASCIIPrefixSearch(t *testing.T) {

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dlclark/regexp2/v2/syntax"
+	"github.com/eugenioenko/regexp2/v2/syntax"
 )
 
 func TestBacktrack_CatastrophicTimeout(t *testing.T) {

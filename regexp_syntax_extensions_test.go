@@ -3,7 +3,7 @@ package regexp2
 import (
 	"testing"
 
-	"github.com/dlclark/regexp2/v2/syntax"
+	"github.com/eugenioenko/regexp2/v2/syntax"
 )
 
 func requireFullMatch(t *testing.T, pattern, input string, options ...CompileOption) *Match {

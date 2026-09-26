@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dlclark/regexp2/v2/syntax"
+	"github.com/eugenioenko/regexp2/v2/syntax"
 )
 
 func TestStringIndexPrefixFilter(t *testing.T) {

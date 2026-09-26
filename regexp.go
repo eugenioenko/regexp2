@@ -19,7 +19,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/dlclark/regexp2/v2/syntax"
+	"github.com/eugenioenko/regexp2/v2/syntax"
 )
 
 var (

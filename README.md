@@ -10,12 +10,12 @@ For extra performance use `regexp2` with [`regexp2cg`](https://github.com/dlclar
 ## Installing
 This is a go-gettable library, so install is easy:
 
-    go get github.com/dlclark/regexp2/v2@latest
+    go get github.com/eugenioenko/regexp2/v2@latest
 
 ## Changes in v2
 Version 2 includes changes that may affect compatibility with existing v1 users:
 
-* The module path is now `github.com/dlclark/regexp2/v2`, so imports need to use the `/v2` suffix.
+* The module path is `github.com/eugenioenko/regexp2/v2`, so imports need to use the `/v2` suffix.
 * The minimum supported Go version is now Go 1.25.
 * Changes to support https://github.com/dlclark/regexp2cg are merged in to support generated regex engines.
 * `Regexp.Split` is now available for splitting strings with regexp matches.
@@ -105,12 +105,12 @@ The default mode supports the following syntax:
 
 ## `regexp` compatibility adapter
 
-The `github.com/dlclark/regexp2/v2/compat` package provides an adapter for callers that want the same `Find*` and `Match*` method signatures as the standard library's `regexp.Regexp`, while still using the `regexp2` engine.
+The `github.com/eugenioenko/regexp2/v2/compat` package provides an adapter for callers that want the same `Find*` and `Match*` method signatures as the standard library's `regexp.Regexp`, while still using the `regexp2` engine.
 
 ```go
 import (
-	"github.com/dlclark/regexp2/v2"
-	"github.com/dlclark/regexp2/v2/compat"
+	"github.com/eugenioenko/regexp2/v2"
+	"github.com/eugenioenko/regexp2/v2/compat"
 )
 
 re := compat.MustCompile(`Your pattern`, regexp2.RE2)

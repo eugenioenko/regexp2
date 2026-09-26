@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/dlclark/regexp2/v2/syntax"
+	"github.com/eugenioenko/regexp2/v2/syntax"
 )
 
 func TestBacktrackingStackLimit(t *testing.T) {
