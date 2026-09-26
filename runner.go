@@ -70,6 +70,10 @@ type Runner struct {
 
 	operator syntax.InstOp
 	codepos  int
+	// codes and storageLimit cache r.code.Codes and runtrackcount*4 for the
+	// per-instruction helpers.
+	codes        []int
+	storageLimit int
 }
 
 type scanMode uint8
@@ -122,6 +126,9 @@ func (r *Runner) scan(rt []rune, textInfo *matchText, textstart, candidate, prev
 // keep the Match on the runner, but only bool-only execution may use quick code
 // with unobservable captures removed.
 func (r *Runner) scanWithMode(rt []rune, textInfo *matchText, textstart, candidate, previousMatchLength, maxStartExclusive int, mode scanMode, timeout time.Duration) (*Match, error) {
+	if r.code != nil {
+		r.codes = r.code.Codes
+	}
 	r.timeout = timeout
 	r.ignoreTimeout = (time.Duration(math.MaxInt64) == timeout)
 	r.debug = r.re.Debug()
@@ -1088,17 +1095,17 @@ func executeDefault(r *Runner) error {
 
 // increase the size of stack and track storage
 func (r *Runner) ensureStorage() error {
-	if r.Runstackpos < r.runtrackcount*4 {
+	if r.Runstackpos < r.storageLimit {
 		doubleIntSlice(&r.runstack, &r.Runstackpos)
 	}
-	if r.Runtrackpos < r.runtrackcount*4 && !r.growTrack() {
+	if r.Runtrackpos < r.storageLimit && !r.growTrack() {
 		return ErrBacktrackingStackLimit
 	}
 	return nil
 }
 
 func (r *Runner) ensureStack(plus int) {
-	if r.Runstackpos-plus < r.runtrackcount*4 {
+	if r.Runstackpos-plus < r.storageLimit {
 		doubleIntSlice(&r.runstack, &r.Runstackpos)
 	}
 }
@@ -1135,18 +1142,18 @@ func (r *Runner) Crawlpos() int {
 
 func (r *Runner) advance(i int) {
 	r.codepos += (i + 1)
-	r.setOperator(r.code.Codes[r.codepos])
+	r.setOperator(r.codes[r.codepos])
 }
 
 func (r *Runner) goTo(newpos int) error {
 	// when branching backward or in place, ensure storage
-	if newpos <= r.codepos {
+	if newpos <= r.codepos && (r.Runstackpos < r.storageLimit || r.Runtrackpos < r.storageLimit) {
 		if err := r.ensureStorage(); err != nil {
 			return err
 		}
 	}
 
-	r.setOperator(r.code.Codes[newpos])
+	r.setOperator(r.codes[newpos])
 	r.codepos = newpos
 	return nil
 }
@@ -1270,13 +1277,13 @@ func (r *Runner) backtrack() error {
 
 	if newpos < 0 {
 		newpos = -newpos
-		r.setOperator(r.code.Codes[newpos] | int(syntax.Back2))
+		r.setOperator(r.codes[newpos] | int(syntax.Back2))
 	} else {
-		r.setOperator(r.code.Codes[newpos] | int(syntax.Back))
+		r.setOperator(r.codes[newpos] | int(syntax.Back))
 	}
 
 	// When branching backward, ensure storage
-	if newpos < r.codepos {
+	if newpos < r.codepos && (r.Runstackpos < r.storageLimit || r.Runtrackpos < r.storageLimit) {
 		if err := r.ensureStorage(); err != nil {
 			return err
 		}
@@ -1350,7 +1357,7 @@ func (r *Runner) stackPeekN(i int) int {
 }
 
 func (r *Runner) operand(i int) int {
-	return r.code.Codes[r.codepos+i+1]
+	return r.codes[r.codepos+i+1]
 }
 
 func (r *Runner) leftchars() int {
@@ -2345,6 +2352,7 @@ func (r *Runner) CheckTimeout() error {
 func (r *Runner) initTrackCount() {
 	if r.code != nil {
 		r.runtrackcount = r.code.TrackCount
+		r.storageLimit = r.runtrackcount * 4
 	}
 }
 
