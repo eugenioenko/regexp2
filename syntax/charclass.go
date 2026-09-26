@@ -453,18 +453,21 @@ func CharDescription(ch rune) string {
 // ZERO WIDTH NON-JOINER and U+200D ZERO WIDTH JOINER.
 func IsWordChar(r rune) bool {
 	//"L", "Mn", "Nd", "Pc"
-	return unicode.In(r,
-		unicode.Categories["L"], unicode.Categories["Mn"],
-		unicode.Categories["Nd"], unicode.Categories["Pc"]) || r == '\u200D' || r == '\u200C'
-	//return 'A' <= r && r <= 'Z' || 'a' <= r && r <= 'z' || '0' <= r && r <= '9' || r == '_'
+	if r < utf8.RuneSelf {
+		return asciiWordChar(r)
+	}
+	return unicode.In(r, unicode.L, unicode.Mn, unicode.Nd, unicode.Pc) || r == '\u200D' || r == '\u200C'
 }
 
 func IsECMAWordChar(r rune) bool {
-	return unicode.In(r,
-		unicode.Categories["L"], unicode.Categories["Mn"],
-		unicode.Categories["Nd"], unicode.Categories["Pc"])
+	if r < utf8.RuneSelf {
+		return asciiWordChar(r)
+	}
+	return unicode.In(r, unicode.L, unicode.Mn, unicode.Nd, unicode.Pc)
+}
 
-	//return 'A' <= r && r <= 'Z' || 'a' <= r && r <= 'z' || '0' <= r && r <= '9' || r == '_'
+func asciiWordChar(r rune) bool {
+	return 'a' <= r && r <= 'z' || 'A' <= r && r <= 'Z' || '0' <= r && r <= '9' || r == '_'
 }
 
 func IsECMAIdentifierStartChar(r rune) bool {

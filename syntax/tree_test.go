@@ -291,7 +291,7 @@ func TestIdenticalTreePatterns(t *testing.T) {
 		{"abcd(?:(?i:e)|(?i:f))", "abcd(?i:[ef])"},
 		{"(?i:abcde)|(?i:abcdf)", "(?i:abcd[ef])"},
 		{"xyz(?:(?i:abcde)|(?i:abcdf))", "xyz(?i:abcd[ef])"},
-		{"bonjour|hej|ciao|shalom|zdravo|pozdrav|hallo|hola|hello|hey|witam|tere|bonjou|salam|helo|sawubona", "(?>bonjou(?>r|)|h(?>e(?>j|(?>l(?>lo|o)|y))|allo|ola)|ciao|s(?>halom|a(?>lam|wubona))|zdravo|pozdrav|witam|tere)"},
+		{"bonjour|hej|ciao|shalom|zdravo|pozdrav|hallo|hola|hello|hey|witam|tere|bonjou|salam|helo|sawubona", "bonjour|bonjou|hej|hallo|hola|hello|hey|helo|ciao|shalom|salam|sawubona|zdravo|pozdrav|witam|tere"},
 		{"\\w\\d123|\\w\\dabc", "\\w\\d(?:123|abc)"},
 		{"(a)(?(1)b)", "(a)(?(1)b|)"},
 		{"(abc)(?(1)def)", "(abc)(?(1)def|)"},

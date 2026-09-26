@@ -1139,6 +1139,7 @@ func (n *RegexNode) reduceAlternation() *RegexNode {
 
 	node := n.replaceNodeIfUnnecessary()
 	if node.T == NtAlternate {
+		node.groupLiteralBranchesByFirstChar()
 		node = node.extractCommonPrefixText()
 		if node.T == NtAlternate {
 			node = node.extractCommonPrefixOneNotoneSet()
@@ -1269,6 +1270,57 @@ func (n *RegexNode) extractCommonPrefixText() *RegexNode {
 	}
 
 	return n
+}
+
+// Stably groups adjacent branches that begin with a literal by their first
+// character so extractCommonPrefixText can factor them into a trie, e.g.
+// const_cast|delete|co_await|default => const_cast|co_await|delete|default.
+// Branches starting with different characters cannot both match at one
+// position, so only the order within each group affects the result. A branch
+// that does not start with a literal may match anywhere and ends the run.
+func (n *RegexNode) groupLiteralBranchesByFirstChar() {
+	if n.Options&RightToLeft != 0 {
+		return
+	}
+	firstChar := func(branch *RegexNode) (rune, bool) {
+		start := branch.findBranchOneOrMultiStart()
+		switch {
+		case start == nil || start.Options&IgnoreCase != 0:
+			return 0, false
+		case start.T == NtOne:
+			return start.Ch, true
+		case len(start.Str) != 0:
+			return start.Str[0], true
+		}
+		return 0, false
+	}
+	for runStart := 0; runStart < len(n.Children); {
+		runEnd := runStart
+		for runEnd < len(n.Children) {
+			if _, ok := firstChar(n.Children[runEnd]); !ok {
+				break
+			}
+			runEnd++
+		}
+		if runEnd-runStart > 2 {
+			run := n.Children[runStart:runEnd]
+			order := make(map[rune]int)
+			for _, branch := range run {
+				ch, _ := firstChar(branch)
+				if _, seen := order[ch]; !seen {
+					order[ch] = len(order)
+				}
+			}
+			if len(order) < len(run) {
+				slices.SortStableFunc(run, func(a, b *RegexNode) int {
+					ca, _ := firstChar(a)
+					cb, _ := firstChar(b)
+					return order[ca] - order[cb]
+				})
+			}
+		}
+		runStart = runEnd + 1
+	}
 }
 
 // This function optimizes out prefix nodes from alternation branches that are

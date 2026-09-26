@@ -15,6 +15,7 @@ import (
 	"math"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -54,6 +55,11 @@ type Regexp struct {
 
 	// cache of machines for running regexp
 	runnerPool *sync.Pool
+	// lastRunner keeps one runner outside runnerPool. sync.Pool caches per P
+	// and is emptied by every GC, so a goroutine that migrates between Ps or
+	// allocates steadily would otherwise rebuild a runner and its backtracking
+	// stacks on most calls.
+	lastRunner *atomic.Pointer[Runner]
 
 	replaceCache *replacerDataCache
 
@@ -319,9 +325,6 @@ func (re *Regexp) FindRunesCaptureIndicesStartingAtBefore(r []rune, startAt, max
 }
 
 func (re *Regexp) findRunesCaptureIndicesStartingAtBefore(r []rune, startAt, maxStartExclusive int, dst []CaptureIndex) ([]CaptureIndex, error) {
-	runner := re.getRunner()
-	defer re.putRunner(runner)
-
 	if startAt < 0 {
 		if re.RightToLeft() {
 			startAt = len(r)
@@ -329,6 +332,16 @@ func (re *Regexp) findRunesCaptureIndicesStartingAtBefore(r []rune, startAt, max
 			startAt = 0
 		}
 	}
+	if re.code != nil && !re.code.RightToLeft {
+		bound, ok := requiredStartBound(re.code.RequiredRunes, r, startAt, maxStartExclusive)
+		if !ok {
+			return dst[:0], nil
+		}
+		maxStartExclusive = bound
+	}
+
+	runner := re.getRunner()
+	defer re.putRunner(runner)
 
 	// Capture-index scans need the full program, not quickCode, because quick
 	// programs are allowed to remove otherwise unobservable capture operations.
@@ -684,6 +697,7 @@ func (re *Regexp) UnmarshalText(text []byte) error {
 }
 
 func (re *Regexp) initCaches() {
+	re.lastRunner = &atomic.Pointer[Runner]{}
 	re.runnerPool = &sync.Pool{
 		New: func() any {
 			return &Runner{

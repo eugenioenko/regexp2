@@ -18,7 +18,7 @@ func TestBacktrack_CatastrophicTimeout(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Logf("code dump: %v", r.code.Dump())
-	const subject = "Do you think you found the problem string!"
+	const subject = "?Do you think you found the problem string!"
 
 	const earlyAllowance = 10 * time.Millisecond
 	var lateAllowance = clockPeriod + 500*time.Millisecond // Large allowance in case machine is slow

@@ -127,6 +127,9 @@ type Code struct {
 	// do not see the candidate as the origin), and -1 means do not slice
 	// (lookbehind or \G).
 	LeftContextRunes int
+	// RequiredRunes holds runes of which every match contains at least one at
+	// or after its start. A match therefore cannot start after the last one.
+	RequiredRunes *RequiredRunes
 }
 
 // DispatchTable maps disjoint character sets to branch indices. Larger tables

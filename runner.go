@@ -172,6 +172,16 @@ func (r *Runner) scanWithMode(rt []rune, textInfo *matchText, textstart, candida
 		r.Runtextpos += bump
 	}
 
+	// Capture-index callers apply this bound before borrowing a runner.
+	if mode != scanCaptureIndices && r.code != nil && !r.code.RightToLeft {
+		if bound, ok := requiredStartBound(r.code.RequiredRunes, rt, r.Runtextpos, maxStartExclusive); !ok {
+			r.tidyMatch(true)
+			return nil, nil
+		} else {
+			maxStartExclusive = bound
+		}
+	}
+
 	r.startTimeoutWatch()
 	for {
 		// A match may consume or inspect text beyond maxStartExclusive; only its
@@ -206,7 +216,7 @@ func (r *Runner) scanWithMode(rt []rune, textInfo *matchText, textstart, candida
 				r.tidyMatch(true)
 				return nil, nil
 			}
-			if !r.ignoreTimeout {
+			if !r.ignoreTimeout && r.deadline.reached() {
 				if err := r.CheckTimeout(); err != nil {
 					return nil, err
 				}
@@ -252,6 +262,9 @@ func executeDefault(r *Runner) error {
 	if err := r.goTo(0); err != nil {
 		return err
 	}
+	// The deadline is a coarse clock tick; polling it on every instruction
+	// costs more than the precision it buys.
+	timeoutPoll := 0
 	for {
 
 		if r.debug {
@@ -259,8 +272,10 @@ func executeDefault(r *Runner) error {
 		}
 
 		if !r.ignoreTimeout {
-			if err := r.CheckTimeout(); err != nil {
-				return err
+			if timeoutPoll++; timeoutPoll&127 == 0 && r.deadline.reached() {
+				if err := r.CheckTimeout(); err != nil {
+					return err
+				}
 			}
 		}
 
@@ -2321,6 +2336,9 @@ func (re *Regexp) getRunner() *Runner {
 	if re.runnerPool == nil {
 		re.initCaches()
 	}
+	if r := re.lastRunner.Swap(nil); r != nil {
+		return r
+	}
 	return re.runnerPool.Get().(*Runner)
 }
 
@@ -2330,6 +2348,9 @@ func (re *Regexp) putRunner(r *Runner) {
 	r.code = re.code
 	if r.runmatch != nil {
 		r.runmatch.text = nil
+	}
+	if re.lastRunner.CompareAndSwap(nil, r) {
+		return
 	}
 	re.runnerPool.Put(r)
 }
@@ -2431,4 +2452,20 @@ func (r *Runner) MatchLength(cap int) int {
 }
 func (r *Runner) MatchIndex(cap int) int {
 	return r.runmatch.matchIndex(cap)
+}
+
+// requiredStartBound narrows maxStartExclusive using the pattern's required
+// runes. ok is false when no match can start at or after start.
+func requiredStartBound(required *syntax.RequiredRunes, text []rune, start, maxStartExclusive int) (bound int, ok bool) {
+	if required == nil {
+		return maxStartExclusive, true
+	}
+	last := required.LastIndex(text, start)
+	if last < 0 {
+		return 0, false
+	}
+	if maxStartExclusive < 0 || last+1 < maxStartExclusive {
+		return last + 1, true
+	}
+	return maxStartExclusive, true
 }

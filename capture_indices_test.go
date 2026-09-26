@@ -278,7 +278,7 @@ func TestFindRunesCaptureIndicesStartingAtBeforeRejectsInvalidBounds(t *testing.
 func TestFindRunesCaptureIndicesStartingAtTimeout(t *testing.T) {
 	re := MustCompile(`(.+)*\?`)
 	re.MatchTimeout = -time.Millisecond
-	got, err := re.FindRunesCaptureIndicesStartingAt([]rune("Do you think you found the problem string!"), 0, nil)
+	got, err := re.FindRunesCaptureIndicesStartingAt([]rune("?Do you think you found the problem string!"), 0, nil)
 	if err == nil || !strings.Contains(err.Error(), "match timeout") {
 		t.Fatalf("error = %v, want match timeout", err)
 	}
