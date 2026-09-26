@@ -1913,10 +1913,11 @@ func (p *parser) scanCharSet(caseInsensitive, scanOnly bool) (*CharSet, error) {
 				continue
 
 			case '-':
-				if !scanOnly {
-					cc.addRange(ch, ch)
-				}
-				continue
+				// An escaped hyphen is a literal that may still be a range
+				// endpoint, as in Oniguruma, PCRE, and JavaScript: [*-\-] and
+				// [\--9]. Returning early here left a pending range open, so
+				// [*-\-/] became *../ and matched '.'.
+				fTranslatedChar = true
 
 			default:
 				p.moveLeft()
