@@ -4,6 +4,10 @@ import "slices"
 
 const maxRequiredRunes = 24
 
+// maxRequiredLiteral bounds the literal search to linear work per input; any
+// prefix of a required literal is itself required.
+const maxRequiredLiteral = 8
+
 // RequiredRunes is a set of runes such that every left-to-right match
 // contains at least one of them at or after its start position, so a match
 // cannot start after the last one.
@@ -21,7 +25,7 @@ func AnalyzeRequiredRunes(tree *RegexTree) *RequiredRunes {
 		return nil
 	}
 	if lit := requiredLiteral(tree.Root); len(lit) >= 2 {
-		return &RequiredRunes{literal: slices.Clone(lit)}
+		return &RequiredRunes{literal: slices.Clone(lit[:min(len(lit), maxRequiredLiteral)])}
 	}
 	set := requiredRunes(tree.Root)
 	if len(set) == 0 {

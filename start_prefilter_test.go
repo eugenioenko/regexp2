@@ -1,6 +1,9 @@
 package regexp2
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestStartPrefilters(t *testing.T) {
 	tests := []struct {
@@ -108,5 +111,20 @@ func TestLastPossibleStart(t *testing.T) {
 				t.Fatalf("LastPossibleStart = %d, want %d", got, test.want)
 			}
 		})
+	}
+}
+
+func TestLongLiteralPrefilterIsLinear(t *testing.T) {
+	re := MustCompile(`^`+strings.Repeat("a", 4096)+`b`, None)
+	input := []rune(strings.Repeat("a", 1<<16))
+	if got := re.LastPossibleStart(input); got != len(input)-8 {
+		t.Fatalf("LastPossibleStart = %d, want %d", got, len(input)-8)
+	}
+	m, err := re.FindRunesMatchStartingAt(input, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m != nil {
+		t.Fatalf("unexpected match at %d", m.RuneIndex)
 	}
 }

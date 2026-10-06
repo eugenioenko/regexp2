@@ -65,6 +65,7 @@ func TestAnalyzeRequiredLiteral(t *testing.T) {
 		{`^\s*([\w\s]*)(enum)\s+(\w+)`, "enum"},
 		{`(?=\s*extends)x`, "extends"},
 		{`(?:foo)bar`, "foobar"},
+		{`template<typename`, "template"},
 		{`foo|bar`, ""},
 		{`(?i)abc`, ""},
 		{`(?<=abc)d`, ""},
