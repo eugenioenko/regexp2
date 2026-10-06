@@ -1,0 +1,36 @@
+# CodeRabbit configuration — https://docs.coderabbit.ai/reference/configuration
+language: en-US
+
+reviews:
+  profile: chill
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: false
+  collapse_walkthrough: true
+  auto_review:
+    enabled: true
+    drafts: false
+  path_filters:
+    - "!go.sum"
+    - "!testdata/**"
+    - "!syntax/unicode_alias_tables.go"
+  path_instructions:
+    - path: "{runner.go,prefixsearch.go,stringprefixfilter.go,syntax/required.go,syntax/leading.go,syntax/optimizations.go,syntax/prefix*.go}"
+      instructions: >
+        Search optimizations may only skip start positions that provably
+        cannot begin a match. Check soundness for lookbehind, negative
+        lookaround, \G, RightToLeft, IgnoreCase, multiline anchors, and
+        non-ASCII input, and that maxStartExclusive bounds are respected.
+        This is the matching hot path: flag new per-call allocations or
+        per-instruction work.
+    - path: "regexp.go"
+      instructions: >
+        Public API changes must keep destination-slice reuse and runner
+        pooling semantics documented on the existing Find* methods.
+    - path: "**/*_test.go"
+      instructions: >
+        Prefer table tests with explicit expected indexes over comparisons
+        between two code paths that share the same optimization.
+
+chat:
+  auto_reply: true
