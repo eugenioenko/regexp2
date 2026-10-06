@@ -7,7 +7,6 @@ func TestAnalyzeRequiredRunes(t *testing.T) {
 		pattern string
 		want    string // "" means no required set
 	}{
-		{`abc`, "a"},
 		{`a|b`, "ab"},
 		{`a?b`, "b"},
 		{`a+b`, "a"},
@@ -16,7 +15,6 @@ func TestAnalyzeRequiredRunes(t *testing.T) {
 		{`(?<!x)y`, "y"},
 		{`(?!x)y`, "y"},
 		{`(?=<)\w+`, "<"},
-		{`\bfoo`, "f"},
 		{`(foo|bar)+`, "bf"},
 		{`a*`, ""},
 		{`a{0,3}`, ""},
@@ -51,6 +49,62 @@ func TestAnalyzeRequiredRunes(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestAnalyzeRequiredLiteral(t *testing.T) {
+	scenarios := []struct {
+		pattern string
+		want    string // "" means no literal of two or more runes
+	}{
+		{`abc`, "abc"},
+		{`\bfoo`, "foo"},
+		{`a\bb`, "ab"},
+		{`x?yz`, "yz"},
+		{`(ab)+c`, "ab"},
+		{`^\s*([\w\s]*)(enum)\s+(\w+)`, "enum"},
+		{`(?=\s*extends)x`, "extends"},
+		{`(?:foo)bar`, "foobar"},
+		{`template<typename`, "template"},
+		{`foo|bar`, ""},
+		{`(?i)abc`, ""},
+		{`(?<=abc)d`, ""},
+		{`(?!abc)d`, ""},
+		{`(ab)?c`, ""},
+		{`a*bc*`, ""},
+	}
+	for _, s := range scenarios {
+		t.Run(s.pattern, func(t *testing.T) {
+			tree, err := Parse(s.pattern, ParseOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got string
+			if required := AnalyzeRequiredRunes(tree); required != nil {
+				got = string(required.literal)
+			}
+			if got != s.want {
+				t.Fatalf("literal = %q, want %q", got, s.want)
+			}
+		})
+	}
+}
+
+func TestRequiredLiteralLastIndex(t *testing.T) {
+	tree, err := Parse(`enum`, ParseOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	required := AnalyzeRequiredRunes(tree)
+	text := []rune("enum a enum b enu")
+	if got := required.LastIndex(text, 0); got != 7 {
+		t.Fatalf("LastIndex = %d, want 7", got)
+	}
+	if got := required.LastIndex(text, 8); got != -1 {
+		t.Fatalf("LastIndex from 8 = %d, want -1", got)
+	}
+	if got := required.LastIndex([]rune("en"), 0); got != -1 {
+		t.Fatalf("LastIndex on short text = %d, want -1", got)
 	}
 }
 
