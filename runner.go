@@ -1508,6 +1508,15 @@ func (r *Runner) charAt(j int) rune {
 }
 
 func findFirstCharDefault(r *Runner) bool {
+	if opts := r.code.FindOptimizations; opts != nil && opts.LeadingAnchor == syntax.NtBol && !r.code.RightToLeft &&
+		r.Runtextpos > 0 && r.Runtext[r.Runtextpos-1] != '\n' {
+		next := slices.Index(r.Runtext[r.Runtextpos:r.Runtextend], '\n')
+		if next < 0 {
+			r.Runtextpos = r.Runtextend
+			return false
+		}
+		r.Runtextpos += next + 1
+	}
 	// A fixed-length expression ending at an end anchor has at most two
 	// possible starts. Use that information before scanning a literal prefix.
 	if opts := r.code.FindOptimizations; opts != nil {

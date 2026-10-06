@@ -762,3 +762,12 @@ func (c *replacerDataCache) add(key string, data *syntax.ReplacerData) {
 		}
 	}
 }
+
+// LastPossibleStart returns an index such that no left-to-right match in r
+// can start after it: -1 when no match is possible, len(r) when unknown.
+func (re *Regexp) LastPossibleStart(r []rune) int {
+	if re.code == nil || re.code.RightToLeft || re.code.RequiredRunes == nil {
+		return len(r)
+	}
+	return re.code.RequiredRunes.LastIndex(r, 0)
+}
