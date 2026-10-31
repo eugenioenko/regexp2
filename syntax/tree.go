@@ -1145,10 +1145,95 @@ func (n *RegexNode) reduceAlternation() *RegexNode {
 			node = node.extractCommonPrefixOneNotoneSet()
 			if node.T == NtAlternate {
 				node = node.removeRedundantEmptiesAndNothings()
+				if node.T == NtAlternate {
+					node = node.groupZeroWidthBranches()
+				}
 			}
 		}
 	}
 	return node
+}
+
+// Wraps runs of adjacent zero-width, capture-free branches in an atomic
+// alternation. Every such branch that succeeds leaves the same position and
+// captures, so once the continuation fails after one of them, retrying it
+// after a later one in the run fails the same way.
+func (n *RegexNode) groupZeroWidthBranches() *RegexNode {
+	wrap := func(children []*RegexNode, parent *RegexNode) *RegexNode {
+		alternate := &RegexNode{T: NtAlternate, Options: n.Options, Children: children}
+		for _, child := range children {
+			child.Parent = alternate
+		}
+		atomic := &RegexNode{T: NtAtomic, Options: n.Options, Children: []*RegexNode{alternate}, Parent: parent}
+		alternate.Parent = atomic
+		return atomic
+	}
+	children := n.Children
+	allZeroWidth := true
+	for _, child := range children {
+		if !child.isZeroWidthWithoutCaptures() {
+			allZeroWidth = false
+			break
+		}
+	}
+	if allZeroWidth {
+		if n.Parent != nil && n.Parent.T == NtAtomic {
+			return n
+		}
+		atomic := &RegexNode{T: NtAtomic, Options: n.Options, Children: []*RegexNode{n}, Parent: n.Parent}
+		n.Parent = atomic
+		return atomic
+	}
+	out := children[:0:0]
+	for i := 0; i < len(children); {
+		j := i
+		for j < len(children) && children[j].isZeroWidthWithoutCaptures() {
+			j++
+		}
+		switch {
+		case j-i >= 2:
+			out = append(out, wrap(slices.Clone(children[i:j]), n))
+			i = j
+		case j == i:
+			out = append(out, children[i])
+			i++
+		default:
+			out = append(out, children[i:j]...)
+			i = j
+		}
+	}
+	n.Children = out
+	return n
+}
+
+func (n *RegexNode) isZeroWidthWithoutCaptures() bool {
+	switch n.T {
+	case NtEmpty, NtBol, NtEol, NtBoundary, NtNonboundary, NtECMABoundary, NtNonECMABoundary,
+		NtBeginning, NtStart, NtEndZ, NtEnd:
+		return true
+	case NtPosLook, NtNegLook:
+		return !n.containsCapture()
+	case NtConcatenate, NtAlternate, NtGroup, NtAtomic:
+		for _, child := range n.Children {
+			if !child.isZeroWidthWithoutCaptures() {
+				return false
+			}
+		}
+		return len(n.Children) != 0
+	}
+	return false
+}
+
+func (n *RegexNode) containsCapture() bool {
+	if n.T == NtCapture {
+		return true
+	}
+	for _, child := range n.Children {
+		if child.containsCapture() {
+			return true
+		}
+	}
+	return false
 }
 
 // Analyzes all the branches of the alternation for text that's identical at the beginning
