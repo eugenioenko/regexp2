@@ -180,6 +180,35 @@ func TestPrefixCharSets(t *testing.T) {
 	}
 }
 
+func TestFindPrefix(t *testing.T) {
+	scenarios := []struct {
+		p, expected string
+	}{
+		{`(?:ab){2}`, "abab"},
+		{`(?:a[bc]){2}d`, "a"},
+		// The captures keep the parser from factoring out the leading "a".
+		{`(abc)|(ade)|(abf)`, "a"},
+		// 😀 and 😁 share their first three UTF-8 bytes.
+		{`(a😀x)|(a😁y)`, "a"},
+		// Copying stops before the prefix would pass maxLoopPrefixLength, and skips the z.
+		{`((((é😀){4}){4}){4}){4}z`, strings.Repeat("é😀", 32)},
+		// Processing each iteration's body again would take 4^30 steps.
+		{strings.Repeat("(", 30) + `\b` + strings.Repeat("){4}", 30) + "ab", "ab"},
+	}
+
+	for _, s := range scenarios {
+		t.Run(s.p, func(t *testing.T) {
+			tree, err := Parse(s.p, ParseOptions{})
+			if err != nil {
+				t.Fatalf("failed to parse %s: %v", s.p, err)
+			}
+			if got := findPrefix(tree.Root); got != s.expected {
+				t.Fatalf("wanted %q got %q for pattern %s", s.expected, got, s.p)
+			}
+		})
+	}
+}
+
 func TestFindPrefixes(t *testing.T) {
 	// case-sensitive
 	scenarios := []struct {
@@ -355,5 +384,21 @@ func TestFindOptimizationsRequiredLandmarkChain(t *testing.T) {
 	}
 	if secondAlt.TrailingWhitespaceSet == nil || secondAlt.RequireWhitespaceAfter {
 		t.Fatal("second separator alternative should allow optional trailing whitespace")
+	}
+}
+
+func TestFindOptimizationsRequiredLandmarkChainAnchors(t *testing.T) {
+	// The runner tests the anchors at each start it advances over, so each
+	// type must appear once. Their order does not matter.
+	tree, err := Parse(`\S*\b\b(?m:^)\b(?m:^)(a|\s*b)c()`, ParseOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	chain := tree.FindOptimizations.LandmarkChain
+	if chain == nil {
+		t.Fatal("LandmarkChain is nil")
+	}
+	if got := chain.Anchors; len(got) != 2 || !slices.Contains(got, NtBoundary) || !slices.Contains(got, NtBol) {
+		t.Fatalf("Anchors = %v, want NtBoundary and NtBol once each", got)
 	}
 }

@@ -1,6 +1,7 @@
 package regexp2
 
 import (
+	"slices"
 	"testing"
 )
 
@@ -85,6 +86,65 @@ func TestRegisterEngine_QuickExecute(t *testing.T) {
 	}
 	if fullCalls != 1 || quickCalls != 1 {
 		t.Fatalf("after FindStringMatch: full calls = %d, quick calls = %d; want 1, 1", fullCalls, quickCalls)
+	}
+}
+
+func TestRegisterEngine_FindNextMatch(t *testing.T) {
+	const pattern = "find-next-match"
+	RegisterEngine(pattern, RuntimeEngineData{
+		CapSize: 1,
+		FindFirstChar: func(r *Runner) bool {
+			return r.Runtextpos < len(r.Runtext)
+		},
+		Execute: func(r *Runner) error {
+			r.Capture(0, r.Runtextpos, r.Runtextpos+1)
+			r.Runtextpos++
+			return nil
+		},
+	})
+
+	re := MustCompile(pattern)
+	m, err := re.FindStringMatch("ab")
+	if err != nil || m == nil {
+		t.Fatalf("FindStringMatch = %v, %v; want match, nil", m, err)
+	}
+	if m, err = re.FindNextMatch(m); err != nil || m == nil || m.String() != "b" {
+		t.Fatalf("FindNextMatch = %v, %v; want b, nil", m, err)
+	}
+}
+
+func TestRegisterEngine_StringOperationsRetainCaptures(t *testing.T) {
+	const pattern = "string-operations-retain-captures"
+	RegisterEngine(pattern, RuntimeEngineData{
+		CapSize: 2,
+		FindFirstChar: func(r *Runner) bool {
+			return r.Runtextpos < r.Runtextend
+		},
+		Execute: func(r *Runner) error {
+			start := r.Runtextpos
+			r.Runtextpos++
+			r.Capture(1, start, r.Runtextpos)
+			r.Capture(0, start, r.Runtextpos)
+			return nil
+		},
+		ExecuteQuick: func(r *Runner) error {
+			t.Fatal("capture-producing APIs must use the full engine")
+			return nil
+		},
+	})
+	re := MustCompile(pattern)
+	m, err := re.FindStringMatch("éa")
+	if err != nil || m == nil || m.GroupByNumber(1).String() != "é" {
+		t.Fatalf("FindStringMatch = %v, %v; want captured é", m, err)
+	}
+	if next, err := re.FindNextMatch(m); err != nil || next == nil || next.GroupByNumber(1).String() != "a" {
+		t.Fatalf("FindNextMatch = %v, %v; want captured a", next, err)
+	}
+	if got, err := re.Replace("éa", "<$1>", -1, -1); err != nil || got != "<é><a>" {
+		t.Fatalf("Replace = %q, %v; want <é><a>", got, err)
+	}
+	if got, err := re.Split("éa", -1); err != nil || !slices.Equal(got, []string{"", "é", "", "a", ""}) {
+		t.Fatalf("Split = %q, %v; want captured delimiters", got, err)
 	}
 }
 
