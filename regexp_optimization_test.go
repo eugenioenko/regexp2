@@ -29,7 +29,7 @@ func TestBacktrackingStackLimit(t *testing.T) {
 			if re.quickCode != nil {
 				runner.code = re.quickCode
 			}
-			m, err := runner.scan(nil, nil, 0, 0, -1, true, re.MatchTimeout)
+			m, err := runner.scan(nil, nil, 0, 0, -1, scanBounds, re.MatchTimeout)
 			if m != nil {
 				t.Fatal("scan unexpectedly matched")
 			}
@@ -114,6 +114,32 @@ func TestEmptyCaptureRepeatIsNotReduced(t *testing.T) {
 	}
 	if got, want := len(match.GroupByNumber(1).Captures), 2; got != want {
 		t.Fatalf("capture count = %d, want %d", got, want)
+	}
+}
+
+func TestReductionsPreserveMatches(t *testing.T) {
+	for _, tc := range []struct {
+		pattern, input, want string
+		index                int
+	}{
+		// [ab]* must give back the b that ([bc]*) captures for \1.
+		{`^[ab]*([bc]*)c\1$`, "bcb", "bcb", 0},
+		// Matching right to left, a* must give back the a that ends the next "ba",
+		{`(?<=(?:a*(ba)){2})$`, "baba", "", 4},
+		// or every a, so that the next end anchor holds.
+		{`(?<=(?:a*\z){2})$`, "a", "", 1},
+		{`(?<=(?:a*$){2})$`, "a", "", 1},
+		{`(?m)(?<=(?:a*$){2})$`, "a", "", 1},
+		// Matching right to left, a* meets the b of "ab", not its a.
+		{`(?<=aba*)`, "ab", "", 2},
+	} {
+		m, err := MustCompile(tc.pattern).FindStringMatch(tc.input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if m == nil || m.String() != tc.want || m.RuneIndex != tc.index {
+			t.Errorf("%q on %q: match = %s, want %q at %d", tc.pattern, tc.input, matchSummary(m), tc.want, tc.index)
+		}
 	}
 }
 
@@ -231,7 +257,7 @@ func TestQuickMatchCaptureLiveness(t *testing.T) {
 	defer re.putRunner(runner)
 	runner.code = re.quickCode
 	input := []rune("aba")
-	m, err := runner.scan(input, nil, 0, 0, -1, true, re.MatchTimeout)
+	m, err := runner.scan(input, nil, 0, 0, -1, scanBounds, re.MatchTimeout)
 	if err != nil || m == nil {
 		t.Fatalf("scan = %v, %v; want match", m, err)
 	}
@@ -243,7 +269,7 @@ func TestQuickMatchCaptureLiveness(t *testing.T) {
 	}
 
 	// A subsequent full match must still return every capture.
-	full, err := re.run(false, 0, -1, input, newMatchText(input))
+	full, err := re.FindRunesMatchStartingAt(input, 0)
 	if err != nil || full == nil {
 		t.Fatalf("full match = %v, %v", full, err)
 	}

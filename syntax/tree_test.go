@@ -320,6 +320,8 @@ func TestIdenticalTreePatterns(t *testing.T) {
 		{"(a*)(b*)(c*)", "((?>a*))((?>b*))((?>c*))"},
 		{"a*b{3,4}", "(?>a*)(?>b{3,4})"},
 		{"[ab]*[^a]*", "[ab]*(?>[^a]*)"},
+		{"[ab]*[cd]*e", "(?>[ab]*)(?>[cd]*)e"},
+		{"(?<=(?:a*b){2})", "(?<=(?:(?>a*)b){2})"},
 		{"[aa]*[^a]*", "(?>a*)(?>[^a]*)"},
 		{"a??", ""},
 		{"ab?c", "a(?>b?)c"},
@@ -340,8 +342,6 @@ func TestIdenticalTreePatterns(t *testing.T) {
 		{"a*(?:bcd|efg)", "(?>a*)(?:bcd|efg)"},
 		{"\\w+\\b", "(?>\\w+)\\b"},
 		{"\\d+\\b", "(?>\\d+)\\b"},
-		{"\\W+\\B", "(?>\\W+)\\B"},
-		{"\\D+\\B", "(?>\\D+)\\B"},
 		{"(?:abc*|def*)g", "(?:ab(?>c*)|de(?>f*))g"},
 		{"(?:a[ce]*|b*)g", "(?:a(?>[ce]*)|(?>b*))g"},
 		{"(?:a[ce]*|b*)c", "(?:a[ce]*|(?>b*))c"},
@@ -498,6 +498,9 @@ func TestNonMatchingTreePatterns(t *testing.T) {
 		{`\d*\b`, `(?>\d*)\b`},
 		{`\W*\B`, `(?>\W*)\B`},
 		{`\D*\B`, `(?>\D*)\B`},
+		// \B holds between two characters of the loop, so it may need them back
+		{`\W+\B`, `(?>\W+)\B`},
+		{`\D+\B`, `(?>\D+)\B`},
 		// Loops inside alternation constructs
 		{"(abc*|def)chi", "(ab(?>c*)|def)chi"},
 		{"(abc|def*)fhi", "(abc|de(?>f*))fhi"},

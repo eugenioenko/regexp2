@@ -15,6 +15,7 @@ func TestPrefiltersAgreeWithUnfilteredPattern(t *testing.T) {
 		`(?:^|(?<=\W))x`, `[a-z]{2,}\d`, `\G\s+`, `\d+(?=px)`, `日本`, `🙂+`, `[αβγ]x`,
 		`abcdefghijklm`, `(?:\s+|(?<=\W)|(?=\W)|^|\n?$)(?<!\w)(?:const|static)(?!\w)`,
 		`(?:(?<![\s\S])|^(?=[\s\S]))\s*\}`, `[[:alpha:]]+:`, `"(?:[^"\\]|\\.)*"`,
+		`^b`, `^$`, `\d*(?:a[bc]){2}d`, `\d*((abc)|(ade)|(abf))`, `\d*(éx|êy)`, `(?:(a)|b)+\1c`,
 	}
 	texts := []string{
 		"foo bar foobar xabc abc\n",
@@ -24,39 +25,53 @@ func TestPrefiltersAgreeWithUnfilteredPattern(t *testing.T) {
 		"x = \"a\\\"b\" } abcdefghijklm\n",
 		"",
 		"\n",
+		"a\rb a\u2028b\r\r\nb abacd ade éx\n",
 	}
-	for _, pattern := range patterns {
-		filtered := MustCompile(pattern, Multiline, OptionMaintainCaptureOrder())
-		unfiltered := MustCompile(`(?:`+pattern+`)|\w(?<=\x00)`, Multiline, OptionMaintainCaptureOrder())
-		if unfiltered.code.RequiredRunes != nil {
-			t.Fatalf("%s: wrapper kept required runes", pattern)
+	for _, options := range []RegexOptions{Multiline, Multiline | ECMAScript} {
+		for _, pattern := range patterns {
+			filtered, err := Compile(pattern, options, OptionMaintainCaptureOrder())
+			if err != nil && options&ECMAScript != 0 {
+				continue
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			unfiltered := MustCompile(`(?:`+pattern+`)|\w(?<=\x00)`, options, OptionMaintainCaptureOrder())
+			testPrefilterAgreement(t, pattern, texts, filtered, unfiltered)
 		}
-		for _, text := range texts {
-			runes := []rune(text)
-			for start := 0; start <= len(runes); start++ {
-				got, err := filtered.FindRunesCaptureIndicesStartingAt(runes, start, nil)
+	}
+}
+
+func testPrefilterAgreement(t *testing.T, pattern string, texts []string, filtered, unfiltered *Regexp) {
+	t.Helper()
+	if unfiltered.code.RequiredRunes != nil {
+		t.Fatalf("%s: wrapper kept required runes", pattern)
+	}
+	for _, text := range texts {
+		runes := []rune(text)
+		for start := 0; start <= len(runes); start++ {
+			got, err := filtered.FindRunesCaptureIndicesStartingAt(runes, start, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want, err := unfiltered.FindRunesCaptureIndicesStartingAt(runes, start, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("%s on %q from %d: %v, unfiltered %v", pattern, text, start, got, want)
+			}
+			for bound := start; bound <= len(runes); bound += 3 {
+				got, err := filtered.FindRunesCaptureIndicesStartingAtBefore(runes, start, bound, nil)
 				if err != nil {
 					t.Fatal(err)
 				}
-				want, err := unfiltered.FindRunesCaptureIndicesStartingAt(runes, start, nil)
-				if err != nil {
-					t.Fatal(err)
+				var wantBounded []CaptureIndex
+				if len(want) != 0 && want[0].RuneIndex < bound {
+					wantBounded = want
 				}
-				if !reflect.DeepEqual(got, want) {
-					t.Fatalf("%s on %q from %d: %v, unfiltered %v", pattern, text, start, got, want)
-				}
-				for bound := start; bound <= len(runes); bound += 3 {
-					got, err := filtered.FindRunesCaptureIndicesStartingAtBefore(runes, start, bound, nil)
-					if err != nil {
-						t.Fatal(err)
-					}
-					var wantBounded []CaptureIndex
-					if len(want) != 0 && want[0].RuneIndex < bound {
-						wantBounded = want
-					}
-					if len(got) != len(wantBounded) || (len(got) != 0 && !reflect.DeepEqual(got, wantBounded)) {
-						t.Fatalf("%s on %q from %d before %d: %v, want %v", pattern, text, start, bound, got, wantBounded)
-					}
+				if len(got) != len(wantBounded) || (len(got) != 0 && !reflect.DeepEqual(got, wantBounded)) {
+					t.Fatalf("%s on %q from %d before %d: %v, want %v", pattern, text, start, bound, got, wantBounded)
 				}
 			}
 		}

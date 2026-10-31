@@ -175,7 +175,7 @@ func leading(n *RegexNode) leadingInfo {
 		}
 		return info
 	case NtEmpty, NtBol, NtEol, NtBoundary, NtNonboundary, NtECMABoundary,
-		NtNonECMABoundary, NtBeginning, NtStart, NtEndZ, NtEnd, NtUpdateBumpalong:
+		NtNonECMABoundary, NtBeginning, NtStart, NtEndZ, NtEnd, NtUpdateBumpalong, NtResetCapture:
 		return leadingZeroWide
 	case NtNothing:
 		return leadingInfo{}

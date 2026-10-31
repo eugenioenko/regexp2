@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode"
 
 	"github.com/eugenioenko/regexp2/v2/syntax"
 )
@@ -72,6 +73,66 @@ func TestSetInCode(t *testing.T) {
 	}
 	if want, got := "[\\s]", r.code.Sets[0].String(); want != got {
 		t.Fatalf("first set wanted %v, got %v", want, got)
+	}
+}
+
+func TestRegexp_QuantifiedStartAnchor(t *testing.T) {
+	r, err := Compile(`^*`)
+	if err != nil {
+		t.Fatalf("Compile(^*): %v", err)
+	}
+	r.MatchTimeout = time.Second
+
+	for _, input := range []string{"", "abc"} {
+		t.Run(fmt.Sprintf("input=%q", input), func(t *testing.T) {
+			m, err := r.FindStringMatch(input)
+			if err != nil {
+				t.Fatalf("FindStringMatch(%q): %v", input, err)
+			}
+			if m == nil {
+				t.Fatal("expected an empty match at the start of the input")
+			}
+			if m.RuneIndex != 0 || m.RuneLength != 0 {
+				t.Fatalf("match at %d with length %d, want index 0 and length 0", m.RuneIndex, m.RuneLength)
+			}
+		})
+	}
+}
+
+func TestRegexp_QuantifiedWordBoundary(t *testing.T) {
+	r, err := Compile(`\b{2}`)
+	if err != nil {
+		t.Fatalf("Compile(\\b{2}): %v", err)
+	}
+	r.MatchTimeout = time.Second
+
+	for _, tc := range []struct {
+		input string
+		index int // -1 means no match.
+	}{
+		{"", -1},
+		{"   ", -1},
+		{"abc", 0},
+		{" abc", 1},
+	} {
+		t.Run(fmt.Sprintf("input=%q", tc.input), func(t *testing.T) {
+			m, err := r.FindStringMatch(tc.input)
+			if err != nil {
+				t.Fatalf("FindStringMatch(%q): %v", tc.input, err)
+			}
+			if tc.index == -1 {
+				if m != nil {
+					t.Fatalf("expected no match, got a match at %d", m.RuneIndex)
+				}
+				return
+			}
+			if m == nil {
+				t.Fatalf("expected an empty match at index %d", tc.index)
+			}
+			if m.RuneIndex != tc.index || m.RuneLength != 0 {
+				t.Fatalf("match at %d with length %d, want index %d and length 0", m.RuneIndex, m.RuneLength, tc.index)
+			}
+		})
 	}
 }
 
@@ -389,6 +450,11 @@ func TestGroups_Basic(t *testing.T) {
 		strs []string
 	}
 	data := []d{
+		{"(a)(b)", // unnamed
+			"ab",
+			[]string{"0", "1", "2"},
+			[]int{0, 1, 2},
+			[]string{"ab", "a", "b"}},
 		{"(?<first_name>\\S+)\\s(?<last_name>\\S+)", // example
 			"Ryan Byington",
 			[]string{"0", "first_name", "last_name"},
@@ -513,6 +579,9 @@ func TestGroups_Basic(t *testing.T) {
 			}
 			if want, got := v.strs[i], grp1.String(); want != got {
 				fatalf(re, v, "Value[%v] Wanted '%v'\nGot '%v'", i, want, got)
+			}
+			if want, got := v.name[i], grp1.Name; want != got {
+				fatalf(re, v, "Name[%v] Wanted '%v'\nGot '%v'", i, want, got)
 			}
 		}
 
@@ -1177,13 +1246,19 @@ func TestRequiredLandmarkAlternativeMatchDoesNotRewindTrailingWhitespace(t *test
 		RequireWhitespaceAfter: true,
 	}
 
-	got, ok := requiredLandmarkAlternativeMatch(input, 2, len(input), alt)
+	var cursor requiredLandmarkCursor
+	got, ok := cursor.find(input, 2, len(input), 3, len(input), &alt)
 	if !ok {
-		t.Fatal("requiredLandmarkAlternativeMatch failed")
+		t.Fatal("requiredLandmarkCursor.find failed")
 	}
-	want := requiredLandmarkMatch{Start: 2, CoreStart: 2, End: 5}
+	want := requiredLandmarkMatch{CoreStart: 2, End: 5}
 	if got != want {
-		t.Fatalf("requiredLandmarkAlternativeMatch = %#v, want %#v", got, want)
+		t.Fatalf("requiredLandmarkCursor.find = %#v, want %#v", got, want)
+	}
+	chain := &syntax.RequiredLandmarkChain{Landmarks: []syntax.RequiredLandmark{{Alternatives: []syntax.RequiredLandmarkAlternative{alt}}}}
+	r := &Runner{Runtext: input, Runtextend: len(input)}
+	if start := requiredLandmarkStart(r, chain, got.CoreStart, make([]requiredLandmarkCursor, 1)); start != 2 {
+		t.Fatalf("requiredLandmarkStart = %d, want 2", start)
 	}
 }
 
@@ -1258,6 +1333,40 @@ func TestUnicodePropertyAliases(t *testing.T) {
 				t.Fatalf("Unexpected err: %v", err)
 			} else if !m {
 				t.Fatalf("Expected %q to match %q", tt.input, tt.pattern)
+			}
+		})
+	}
+}
+
+func TestCategoryConcurrentCompileAndMatch(t *testing.T) {
+	// Exercise category resolution concurrently with matching on an already
+	// shared regexp, not just concurrent use of the runner pool.
+	shared := MustCompile(`^[\p{Greek}\p{Nd}]+$`)
+	for i := range 16 {
+		t.Run(fmt.Sprint(i), func(t *testing.T) {
+			t.Parallel()
+			for _, tc := range []struct {
+				pattern, yes, no string
+			}{
+				{`^\p{gcb=Extend}+$`, "\u0301\u0308", "a"},
+				{`^[\p{L}-[\p{Greek}]]+$`, "aé", "Σσ"},
+			} {
+				re, err := Compile(tc.pattern)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if ok, err := re.MatchString(tc.yes); err != nil || !ok {
+					t.Fatalf("%s on %q = %v, %v; want true, nil", tc.pattern, tc.yes, ok, err)
+				}
+				if ok, err := re.MatchString(tc.no); err != nil || ok {
+					t.Fatalf("%s on %q = %v, %v; want false, nil", tc.pattern, tc.no, ok, err)
+				}
+			}
+			if ok, err := shared.MatchString("Σ٥σ"); err != nil || !ok {
+				t.Fatalf("shared match = %v, %v; want true, nil", ok, err)
+			}
+			if _, err := Compile(`\p{NotAUnicodeProperty}`); err == nil {
+				t.Fatal("unknown property compiled successfully")
 			}
 		})
 	}
@@ -1561,9 +1670,27 @@ func TestECMAGroupNameUnicode(t *testing.T) {
 		}
 	})
 
-	t.Run("extended-unicode-escape-requires-unicode-option", func(t *testing.T) {
-		if _, err := Compile(`(?<\u{03C0}>a)`, ECMAScript); err == nil {
-			t.Fatal("Expected error without Unicode option")
+	t.Run("extended-unicode-escape-without-unicode-option", func(t *testing.T) {
+		re := MustCompile(`(?<\u{1D49C}>a)`, ECMAScript)
+		if want, got := []string{"", "\U0001D49C"}, re.GetGroupNames(); !stringSlicesEqual(want, got) {
+			t.Fatalf("Group names = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("surrogate-pair-escape", func(t *testing.T) {
+		for _, opt := range []RegexOptions{ECMAScript, ECMAScript | Unicode} {
+			re := MustCompile(`(?<a\uD835\uDC9C>a)`, opt)
+			if want, got := []string{"", "a\U0001D49C"}, re.GetGroupNames(); !stringSlicesEqual(want, got) {
+				t.Fatalf("Group names = %v, want %v", got, want)
+			}
+		}
+	})
+
+	t.Run("lone-surrogate-escape", func(t *testing.T) {
+		for _, expr := range []string{`(?<\uD835>a)`, `(?<\uD835\u0041>a)`, `(?<\uDC9C>a)`} {
+			if _, err := Compile(expr, ECMAScript); err == nil {
+				t.Fatalf("Expected error: %s", expr)
+			}
 		}
 	})
 
@@ -1592,6 +1719,22 @@ func TestECMAGroupNameUnicode(t *testing.T) {
 	})
 }
 
+func TestECMAQuantifiedAssertion(t *testing.T) {
+	for _, expr := range []string{`^*`, `a$+`, `\b{2}`, `\B?`, `(?=a)*`, `(?!a){1,}`} {
+		if _, err := Compile(expr, ECMAScript|Unicode); err == nil {
+			t.Fatalf("%s: expected error", expr)
+		}
+	}
+	for _, expr := range []string{`^*`, `a$+`, `\b{2}`, `\B?`} {
+		if _, err := Compile(expr, ECMAScript); err == nil {
+			t.Fatalf("%s: expected error", expr)
+		}
+	}
+	for _, expr := range []string{`(?=a)*`, `(?!a)?`, `(?:^)*`, `^{`, `\b{a}`} {
+		MustCompile(expr, ECMAScript)
+	}
+}
+
 func TestECMAGroupNameIdentifierChars(t *testing.T) {
 	for _, tc := range []struct {
 		expr string
@@ -1617,13 +1760,29 @@ func TestECMAGroupNameIdentifierChars(t *testing.T) {
 func TestECMADuplicateGroupNames(t *testing.T) {
 	for _, expr := range []string{
 		`(?<a>a)(?<a>a)`,
-		`(?<a>a)|(?<a>a)`,
 	} {
 		if _, err := Compile(expr, ECMAScript); err == nil {
 			t.Fatalf("%s: expected duplicate group name error", expr)
 		}
 		if _, err := Compile(expr); err != nil {
 			t.Fatalf("%s: non-ECMAScript behavior changed: %v", expr, err)
+		}
+	}
+	// Issue #116 identified this formerly rejected pattern. Identical branch
+	// text is allowed by ECMAScript 2025 §22.2.1.4 MightBothParticipate and
+	// must retain distinct group numbers; the first alternative wins.
+	// https://github.com/dlclark/regexp2/issues/116
+	for _, options := range []RegexOptions{ECMAScript, ECMAScript | Unicode} {
+		re := MustCompile(`(?<a>a)|(?<a>a)`, options)
+		m, err := re.FindStringMatch("a")
+		if err != nil || m == nil {
+			t.Fatalf("identical alternatives: FindStringMatch = %v, %v", m, err)
+		}
+		if m.GroupCount() != 3 || m.GroupByName("a") != m.GroupByNumber(1) || m.GroupByNumber(1).String() != "a" {
+			t.Fatal("identical alternatives did not retain distinct groups and select the first")
+		}
+		if group := m.GroupByNumber(2); group.Name != "a" || len(group.Captures) != 0 {
+			t.Fatal("second identical alternative should be an unmatched group named a")
 		}
 	}
 }
@@ -1766,6 +1925,40 @@ func TestEcmaScriptUnicodeRange(t *testing.T) {
 	}
 	if m == nil {
 		t.Fatal("Expected non-nil, got nil")
+	}
+}
+
+func TestCharacterClassUnionPreservesPolarity(t *testing.T) {
+	// Complement-shaped ranges must keep their union semantics while more
+	// members are added, regardless of the order or the regex flavor.
+	last := string(unicode.MaxRune)
+	for _, options := range []RegexOptions{None, ECMAScript, RE2} {
+		for _, tc := range []struct {
+			pattern string
+			matches string
+			misses  string
+		}{
+			{`[\x01-` + last + `]`, "a" + last, "\x00"},
+			{`[\x01-` + last + `\x00]`, "\x00a" + last, ""},
+			{`[\x00\x01-` + last + `]`, "\x00a" + last, ""},
+			{`[^\x01-` + last + `]`, "\x00", "a" + last},
+			{`[\x00-/:-` + last + `a]`, "-a" + last, "09"},
+			{`[\x00-/:-` + last + `\d]`, "-09a" + last, ""},
+		} {
+			t.Run(fmt.Sprintf("%s/%d", tc.pattern, options), func(t *testing.T) {
+				re := MustCompile(`^`+tc.pattern+`$`, options)
+				for _, inputs := range []struct {
+					chars string
+					want  bool
+				}{{tc.matches, true}, {tc.misses, false}} {
+					for _, c := range inputs.chars {
+						if got, err := re.MatchString(string(c)); err != nil || got != inputs.want {
+							t.Errorf("MatchString(%q) = %v, %v; want %v", c, got, err, inputs.want)
+						}
+					}
+				}
+			})
+		}
 	}
 }
 
@@ -2440,6 +2633,108 @@ func TestRepeatPrefixNullableFixed(t *testing.T) {
 		}
 		if want, got := "-", g[2].String(); want != got {
 			t.Fatalf("Group 2 Wanted %v, got %v", want, got)
+		}
+	}
+}
+
+func TestBackreferenceFastPaths(t *testing.T) {
+	for _, mode := range []struct {
+		name   string
+		re     *Regexp
+		legacy bool
+	}{
+		{"default", MustCompile(`^([\s\S]*)#\1$`, IgnoreCase), false},
+		{"legacy", MustCompile(`^([\s\S]*)#\1$`, ECMAScript|IgnoreCase), true},
+		{"unicode", MustCompile(`^([\s\S]*)#\1$`, ECMAScript|Unicode|IgnoreCase), false},
+		{"right to left", MustCompile(`^\1#([\s\S]*)$`, IgnoreCase|RightToLeft), false},
+		{"legacy right to left", MustCompile(`^\1#([\s\S]*)$`, ECMAScript|IgnoreCase|RightToLeft), true},
+	} {
+		t.Run(mode.name, func(t *testing.T) {
+			for _, tc := range []struct {
+				left, right string
+				want        bool
+				unicodeOnly bool
+			}{
+				{"", "", true, false},
+				{"", "a", false, false},
+				{"a", "A", true, false},
+				{"aZ09_@", "aZ09_@", true, false},
+				{"aZ09_@", "Az09_@", true, false},
+				{"A[", "a{", false, false},
+				{"@", "`", false, false},
+				{"9", "8", false, false},
+				{"Σé𐐀", "Σé𐐀", true, false},
+				{"Σ", "ς", true, false},
+				{"s", "ſ", true, true},
+				{"k", "K", true, true},
+				{"i", "İ", false, false},
+				{"I", "ı", false, false},
+				{"ß", "ẞ", true, true},
+				{"𐐀", "𐐨", true, true},
+				{"ß", "ss", false, false},
+				{"AbΣs!", "aBςſ!", true, true},
+				{"AbΣ!", "aBς?", false, false},
+				{"AbΣ!", "xbς!", false, false},
+				{"AbΣ!", "aXς!", false, false},
+				{"AbΣa", "AbΣA", true, false},
+				{"A" + strings.Repeat("a", 32), strings.Repeat("a", 33), true, false},
+				{"A" + strings.Repeat("a", 32), "b" + strings.Repeat("a", 32), false, false},
+				{strings.Repeat("a", 65), strings.Repeat("A", 65), true, false},
+			} {
+				want := tc.want && !(mode.legacy && tc.unicodeOnly)
+				// Exercise both ASCII/non-ASCII operand orders and mixed prefixes.
+				for _, input := range []string{tc.left + "#" + tc.right, tc.right + "#" + tc.left} {
+					if got, err := mode.re.MatchRunes([]rune(input)); err != nil || got != want {
+						t.Errorf("%s.MatchRunes(%q) = %v, %v; want %v", mode.re, input, got, err, want)
+					}
+					if got, err := mode.re.MatchString(input); err != nil || got != want {
+						t.Errorf("%s.MatchString(%q) = %v, %v; want %v", mode.re, input, got, err, want)
+					}
+					m, err := mode.re.FindStringMatch(input)
+					if err != nil || (m != nil) != want {
+						t.Errorf("%s.FindStringMatch(%q) = %v, %v; want match %v", mode.re, input, m, err, want)
+					} else if m != nil && m.String() != input {
+						t.Errorf("matched %q, want full input %q", m.String(), input)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestLiteralMatch(t *testing.T) {
+	for _, literal := range []string{"abcd", strings.Repeat("abcd", 16) + "x", strings.Repeat("éΣ𐐀z", 16) + "λ"} {
+		for _, options := range []RegexOptions{None, RightToLeft} {
+			t.Run(fmt.Sprintf("%q/options_%d", literal, options), func(t *testing.T) {
+				// The surrounding wildcards require matching on both sides of the literal.
+				re := MustCompile(`\A.(?<literal>`+literal+`).\z`, options)
+				text := "#" + literal + "!"
+				m, err := re.FindStringMatch(text)
+				if err != nil || m == nil {
+					t.Fatalf("FindStringMatch = %v, %v; want a match", m, err)
+				}
+				g := m.GroupByName("literal")
+				if m.String() != text || g == nil || g.String() != literal || g.RuneIndex != 1 || g.RuneLength != len([]rune(literal)) {
+					t.Fatalf("unexpected match or capture: %v, %v", m, g)
+				}
+				check := func(input string, want bool) {
+					t.Helper()
+					if got, err := re.MatchString(input); err != nil || got != want {
+						t.Errorf("MatchString(%q) = %v, %v; want %v", input, got, err, want)
+					}
+					if got, err := re.MatchRunes([]rune(input)); err != nil || got != want {
+						t.Errorf("MatchRunes(%q) = %v, %v; want %v", input, got, err, want)
+					}
+				}
+				check(text, true)
+				check("#"+literal, false)
+				runes := []rune(literal)
+				for _, pos := range []int{0, 1, len(runes) / 2, len(runes) - 2, len(runes) - 1} {
+					candidate := append([]rune(nil), runes...)
+					candidate[pos] = '?'
+					check("#"+string(candidate)+"!", false)
+				}
+			})
 		}
 	}
 }

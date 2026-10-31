@@ -239,7 +239,7 @@ func exactLiteral(n *RegexNode) []rune {
 func zeroWidth(n *RegexNode) bool {
 	switch n.T {
 	case NtBol, NtEol, NtBoundary, NtNonboundary, NtECMABoundary, NtNonECMABoundary,
-		NtBeginning, NtStart, NtEndZ, NtEnd, NtPosLook, NtNegLook, NtEmpty, NtUpdateBumpalong:
+		NtBeginning, NtStart, NtEndZ, NtEnd, NtPosLook, NtNegLook, NtEmpty, NtUpdateBumpalong, NtResetCapture:
 		return true
 	}
 	return false
