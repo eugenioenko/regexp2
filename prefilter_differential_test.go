@@ -15,6 +15,10 @@ func TestPrefiltersAgreeWithUnfilteredPattern(t *testing.T) {
 		`(?:^|(?<=\W))x`, `[a-z]{2,}\d`, `\G\s+`, `\d+(?=px)`, `日本`, `🙂+`, `[αβγ]x`,
 		`abcdefghijklm`, `(?:\s+|(?<=\W)|(?=\W)|^|\n?$)(?<!\w)(?:const|static)(?!\w)`,
 		`(?:(?<![\s\S])|^(?=[\s\S]))\s*\}`, `[[:alpha:]]+:`, `"(?:[^"\\]|\\.)*"`,
+		`\w+(?=:\s*(?:Function|\([^)]*\)|[^;=]*=\s*function))`,
+		`x(?=(?:ab|cd)z)`, `x(?=(?:ab|)z)`, `x(?=(?:ab|(?i:CD))z)`,
+		`x(?=(?:éa|界b)z)`, `x(?=(?:ab|cd)?)`, `x(?=(?:ab|cd)+)`,
+		`(?<=ab|cd)x`, `(?<!ab|cd)x`, `x(?!ab|cd)`,
 	}
 	texts := []string{
 		"foo bar foobar xabc abc\n",
@@ -24,12 +28,17 @@ func TestPrefiltersAgreeWithUnfilteredPattern(t *testing.T) {
 		"x = \"a\\\"b\" } abcdefghijklm\n",
 		"",
 		"\n",
+		"name: { kind: 'SCALAR'; name: 'String' } name: Function handler: (x)",
+		"handler: Type = function xabz xcdz xz xCDz x界bz xéaz abx cdx ex",
 	}
 	for _, pattern := range patterns {
 		filtered := MustCompile(pattern, Multiline, OptionMaintainCaptureOrder())
 		unfiltered := MustCompile(`(?:`+pattern+`)|\w(?<=\x00)`, Multiline, OptionMaintainCaptureOrder())
 		if unfiltered.code.RequiredRunes != nil {
 			t.Fatalf("%s: wrapper kept required runes", pattern)
+		}
+		if unfiltered.code.RequiredBranches != nil {
+			t.Fatalf("%s: wrapper kept required branches", pattern)
 		}
 		for _, text := range texts {
 			runes := []rune(text)

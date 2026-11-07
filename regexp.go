@@ -333,7 +333,7 @@ func (re *Regexp) findRunesCaptureIndicesStartingAtBefore(r []rune, startAt, max
 		}
 	}
 	if re.code != nil && !re.code.RightToLeft {
-		bound, ok := requiredStartBound(re.code.RequiredRunes, r, startAt, maxStartExclusive)
+		bound, ok := requiredStartBound(re.code, r, startAt, maxStartExclusive)
 		if !ok {
 			return dst[:0], nil
 		}
@@ -766,8 +766,12 @@ func (c *replacerDataCache) add(key string, data *syntax.ReplacerData) {
 // LastPossibleStart returns an index such that no left-to-right match in r
 // can start after it: -1 when no match is possible, len(r) when unknown.
 func (re *Regexp) LastPossibleStart(r []rune) int {
-	if re.code == nil || re.code.RightToLeft || re.code.RequiredRunes == nil {
+	if re.code == nil || re.code.RightToLeft {
 		return len(r)
 	}
-	return re.code.RequiredRunes.LastIndex(r, 0)
+	bound, ok := requiredStartBound(re.code, r, 0, -1)
+	if !ok {
+		return -1
+	}
+	return bound - 1
 }

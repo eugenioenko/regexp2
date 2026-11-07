@@ -181,7 +181,7 @@ func (r *Runner) scanWithMode(rt []rune, textInfo *matchText, textstart, candida
 
 	// Capture-index callers apply this bound before borrowing a runner.
 	if mode != scanCaptureIndices && r.code != nil && !r.code.RightToLeft {
-		if bound, ok := requiredStartBound(r.code.RequiredRunes, rt, r.Runtextpos, maxStartExclusive); !ok {
+		if bound, ok := requiredStartBound(r.code, rt, r.Runtextpos, maxStartExclusive); !ok {
 			r.tidyMatch(true)
 			return nil, nil
 		} else {
@@ -2490,11 +2490,14 @@ func (r *Runner) MatchIndex(cap int) int {
 
 // requiredStartBound narrows maxStartExclusive using the pattern's required
 // runes. ok is false when no match can start at or after start.
-func requiredStartBound(required *syntax.RequiredRunes, text []rune, start, maxStartExclusive int) (bound int, ok bool) {
-	if required == nil {
-		return maxStartExclusive, true
+func requiredStartBound(code *syntax.Code, text []rune, start, maxStartExclusive int) (bound int, ok bool) {
+	last := len(text)
+	if code.RequiredRunes != nil {
+		last = code.RequiredRunes.LastIndex(text, start)
 	}
-	last := required.LastIndex(text, start)
+	if last >= 0 && code.RequiredBranches != nil {
+		last = min(last, code.RequiredBranches.LastIndex(text, start))
+	}
 	if last < 0 {
 		return 0, false
 	}
