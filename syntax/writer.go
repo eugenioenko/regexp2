@@ -67,6 +67,8 @@ type writer struct {
 	trackcount        int
 	caps              map[int]int
 	quickCaptureSlots []bool
+	memoAllowed       bool
+	memoPositions     []int
 }
 
 type dispatchInfo struct {
@@ -129,6 +131,7 @@ func (w *writer) codeFromTree(tree *RegexTree) (*Code, error) {
 	}
 
 	w.counting = true
+	w.memoAllowed = w.quickCaptureSlots == nil && treeAllowsBranchmarkMemo(tree)
 
 	for {
 		if !w.counting {
@@ -202,24 +205,40 @@ func (w *writer) codeFromTree(tree *RegexTree) (*Code, error) {
 	}
 
 	return &Code{
-		Codes:             w.emitted,
-		Strings:           w.stringtable,
-		Sets:              w.settable,
-		Dispatches:        w.dispatchtable,
-		TrackCount:        w.trackcount,
-		Caps:              w.caps,
-		Capsize:           capsize,
-		CaptureSlotInUse:  captureSlotsInUse(w.emitted, capsize),
-		FcPrefix:          fcPrefix,
-		BmPrefix:          bmPrefix,
-		Anchors:           getAnchors(tree),
-		RightToLeft:       rtl,
-		FindOptimizations: tree.FindOptimizations,
-		LeftContextRunes:  AnalyzeLeftContext(tree.Root),
-		RequiredRunes:     AnalyzeRequiredRunes(tree),
-		RequiredBranches:  AnalyzeRequiredBranches(tree),
-		LeadingFilter:     leadingFilterFor(tree),
+		Codes:               w.emitted,
+		Strings:             w.stringtable,
+		Sets:                w.settable,
+		Dispatches:          w.dispatchtable,
+		TrackCount:          w.trackcount,
+		Caps:                w.caps,
+		Capsize:             capsize,
+		CaptureSlotInUse:    captureSlotsInUse(w.emitted, capsize),
+		FcPrefix:            fcPrefix,
+		BmPrefix:            bmPrefix,
+		Anchors:             getAnchors(tree),
+		RightToLeft:         rtl,
+		FindOptimizations:   tree.FindOptimizations,
+		LeftContextRunes:    AnalyzeLeftContext(tree.Root),
+		RequiredRunes:       AnalyzeRequiredRunes(tree),
+		RequiredBranches:    AnalyzeRequiredBranches(tree),
+		LeadingFilter:       leadingFilterFor(tree),
+		BranchmarkMemoSlots: w.branchmarkMemoSlots(),
+		BranchmarkMemoCount: len(w.memoPositions),
 	}, nil
+}
+
+func (w *writer) branchmarkMemoSlots() []int32 {
+	if len(w.memoPositions) == 0 {
+		return nil
+	}
+	slots := make([]int32, len(w.emitted))
+	for i := range slots {
+		slots[i] = -1
+	}
+	for slot, pos := range w.memoPositions {
+		slots[pos] = int32(slot)
+	}
+	return slots
 }
 
 // AnalyzeLeftContext returns how many runes before a candidate start the matcher
@@ -402,6 +421,9 @@ func (w *writer) emitFragment(nodetype NodeType, node *RegexNode, curIndex int) 
 				w.emit2(Branchcount+lazy, w.popInt(), node.N-node.M)
 			}
 		} else {
+			if lazy == 0 && w.memoAllowed && !w.counting && branchmarkMemoEligible(node) {
+				w.memoPositions = append(w.memoPositions, w.curPos())
+			}
 			w.emit1(Branchmark+lazy, w.popInt())
 		}
 

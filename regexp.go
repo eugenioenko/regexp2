@@ -144,6 +144,8 @@ func makeQuickCode(code *syntax.Code) *syntax.Code {
 	quick.Dispatches = code.QuickDispatches
 	quick.QuickCodes = nil
 	quick.QuickDispatches = nil
+	quick.BranchmarkMemoSlots = nil
+	quick.BranchmarkMemoCount = 0
 	return &quick
 }
 
@@ -316,7 +318,7 @@ func (re *Regexp) FindRunesCaptureIndicesStartingAt(r []rune, startAt int, dst [
 // start, so the bound cannot be applied without changing its meaning.
 func (re *Regexp) FindRunesCaptureIndicesStartingAtBefore(r []rune, startAt, maxStartExclusive int, dst []CaptureIndex) ([]CaptureIndex, error) {
 	if re.RightToLeft() {
-		return dst[:0], errors.New("regexp2: match-start bounds are not supported for right-to-left regexps")
+		return dst[:0], errRightToLeftStartBound
 	}
 	if maxStartExclusive < 0 {
 		return dst[:0], errors.New("regexp2: maxStartExclusive must be non-negative")
@@ -324,7 +326,13 @@ func (re *Regexp) FindRunesCaptureIndicesStartingAtBefore(r []rune, startAt, max
 	return re.findRunesCaptureIndicesStartingAtBefore(r, startAt, maxStartExclusive, dst)
 }
 
+var errRightToLeftStartBound = errors.New("regexp2: match-start bounds are not supported for right-to-left regexps")
+
 func (re *Regexp) findRunesCaptureIndicesStartingAtBefore(r []rune, startAt, maxStartExclusive int, dst []CaptureIndex) ([]CaptureIndex, error) {
+	return re.findRunesCaptureIndicesWithMemo(r, startAt, maxStartExclusive, nil, dst)
+}
+
+func (re *Regexp) findRunesCaptureIndicesWithMemo(r []rune, startAt, maxStartExclusive int, memo *SearchMemo, dst []CaptureIndex) ([]CaptureIndex, error) {
 	if startAt < 0 {
 		if re.RightToLeft() {
 			startAt = len(r)
@@ -332,12 +340,29 @@ func (re *Regexp) findRunesCaptureIndicesStartingAtBefore(r []rune, startAt, max
 			startAt = 0
 		}
 	}
+	if memo != nil && memo.code != re.code {
+		memo = nil
+	}
+	if memo != nil {
+		memo.noMatchBefore = startAt
+	}
+	requiredLimit := len(r) + 1
 	if re.code != nil && !re.code.RightToLeft {
-		bound, ok := requiredStartBound(re.code, r, startAt, maxStartExclusive)
-		if !ok {
+		if memo != nil {
+			memo.bind(r)
+			requiredLimit = memo.requiredStartLimit(startAt, r)
+		} else {
+			requiredLimit = requiredStartLimit(re.code, r, startAt)
+		}
+		if requiredLimit < 0 {
+			if memo != nil {
+				memo.noMatchBefore = len(r) + 1
+			}
 			return dst[:0], nil
 		}
-		maxStartExclusive = bound
+		if maxStartExclusive < 0 || requiredLimit < maxStartExclusive {
+			maxStartExclusive = requiredLimit
+		}
 	}
 
 	runner := re.getRunner()
@@ -346,14 +371,34 @@ func (re *Regexp) findRunesCaptureIndicesStartingAtBefore(r []rune, startAt, max
 	// Capture-index scans need the full program, not quickCode, because quick
 	// programs are allowed to remove otherwise unobservable capture operations.
 	runner.code = re.code
+	if memo != nil {
+		runner.memo = memo
+		runner.memoSlots = re.code.BranchmarkMemoSlots
+		defer func() {
+			runner.memo = nil
+			runner.memoSlots = nil
+		}()
+	}
 	m, err := runner.scanWithMode(r, nil, startAt, startAt, -1, maxStartExclusive, scanCaptureIndices, re.MatchTimeout)
-	if err != nil || m == nil {
+	if err != nil {
 		return dst[:0], err
+	}
+	if m == nil {
+		if memo != nil {
+			memo.noMatchBefore = runner.noMatchBefore
+			if memo.noMatchBefore >= requiredLimit {
+				memo.noMatchBefore = len(r) + 1
+			}
+		}
+		return dst[:0], nil
 	}
 	// The runner's candidate position is normally group zero's start. Keep the
 	// public contract defensive against custom registered engines that move it.
 	if maxStartExclusive >= 0 && m.matchIndex(0) >= maxStartExclusive {
 		return dst[:0], nil
+	}
+	if memo != nil {
+		memo.noMatchBefore = m.matchIndex(0)
 	}
 	m.tidyCaptureData()
 
