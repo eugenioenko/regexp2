@@ -129,7 +129,8 @@ type Code struct {
 	LeftContextRunes int
 	// RequiredRunes holds runes of which every match contains at least one at
 	// or after its start. A match therefore cannot start after the last one.
-	RequiredRunes *RequiredRunes
+	RequiredRunes    *RequiredRunes
+	RequiredBranches *RequiredBranches
 	// LeadingFilter is set only when FindOptimizations has no search strategy.
 	LeadingFilter *LeadingFilter
 }
