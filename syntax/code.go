@@ -133,6 +133,10 @@ type Code struct {
 	RequiredBranches *RequiredBranches
 	// LeadingFilter is set only when FindOptimizations has no search strategy.
 	LeadingFilter *LeadingFilter
+	// BranchmarkMemoSlots maps a Branchmark code position to its memo slot, or
+	// -1. It is nil when no Branchmark state can be memoized.
+	BranchmarkMemoSlots []int32
+	BranchmarkMemoCount int
 }
 
 // DispatchTable maps disjoint character sets to branch indices. Larger tables

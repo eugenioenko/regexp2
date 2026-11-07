@@ -74,6 +74,19 @@ type Runner struct {
 	// per-instruction helpers.
 	codes        []int
 	storageLimit int
+
+	memo      *SearchMemo
+	memoSlots []int32
+	// noMatchBefore is set by a left-to-right scan that returns no match: no
+	// match starts in [start, noMatchBefore). len(text)+1 means none at all.
+	noMatchBefore int
+}
+
+func (r *Runner) memoSlot() int32 {
+	if r.memoSlots == nil {
+		return -1
+	}
+	return r.memoSlots[r.codepos]
 }
 
 type scanMode uint8
@@ -168,6 +181,7 @@ func (r *Runner) scanWithMode(rt []rune, textInfo *matchText, textstart, candida
 	}
 
 	r.initMatch(textInfo)
+	r.noMatchBefore = len(rt) + 1
 
 	// An empty previous match must not be returned again. Keep Runtextstart at
 	// the previous match position for \G, but move the candidate scan position.
@@ -203,6 +217,9 @@ func (r *Runner) scanWithMode(rt []rune, textInfo *matchText, textstart, candida
 			}
 			next := leadingFilter.IndexFrom(rt, r.Runtextpos, end)
 			if next < 0 {
+				if end < r.Runtextend {
+					r.noMatchBefore = end
+				}
 				r.tidyMatch(true)
 				return nil, nil
 			}
@@ -212,6 +229,7 @@ func (r *Runner) scanWithMode(rt []rune, textInfo *matchText, textstart, candida
 		// candidate start is bounded. Keep Runtextend at the real input end so
 		// lookahead and ordinary consuming matches retain their normal semantics.
 		if maxStartExclusive >= 0 && r.Runtextpos >= maxStartExclusive {
+			r.noMatchBefore = r.Runtextpos
 			r.tidyMatch(true)
 			return nil, nil
 		}
@@ -237,6 +255,7 @@ func (r *Runner) scanWithMode(rt []rune, textInfo *matchText, textstart, candida
 			// Optimized finders may jump directly to a literal or character-set
 			// candidate beyond the requested range.
 			if maxStartExclusive >= 0 && r.Runtextpos >= maxStartExclusive {
+				r.noMatchBefore = r.Runtextpos
 				r.tidyMatch(true)
 				return nil, nil
 			}
@@ -437,6 +456,10 @@ func executeDefault(r *Runner) error {
 			}
 
 		case syntax.Branchmark:
+			slot := r.memoSlot()
+			if slot >= 0 && r.textPos() != r.runstack[r.Runstackpos] && r.memo.failed(slot, r.textPos()) {
+				break
+			}
 			r.stackPop()
 
 			matched := r.textPos() - r.stackPeek()
@@ -447,6 +470,9 @@ func executeDefault(r *Runner) error {
 				if err := r.goTo(r.operand(0)); err != nil { // Loop
 					return err
 				}
+			} else if slot >= 0 {
+				r.trackPushNeg2(r.stackPeek(), -1)
+				r.advance(1)
 			} else { // Empty match -> straight now
 				r.trackPushNeg1(r.stackPeek()) // Save old mark
 				r.advance(1)                   // Straight
@@ -456,13 +482,25 @@ func executeDefault(r *Runner) error {
 		case syntax.Branchmark | syntax.Back:
 			r.trackPopN(2)
 			r.stackPop()
-			r.textto(r.trackPeekN(1))      // Recall position
-			r.trackPushNeg1(r.trackPeek()) // Save old mark
-			r.advance(1)                   // Straight
+			pos := r.trackPeekN(1)
+			r.textto(pos) // Recall position
+			if r.memoSlot() >= 0 {
+				r.trackPushNeg2(r.trackPeek(), pos)
+			} else {
+				r.trackPushNeg1(r.trackPeek()) // Save old mark
+			}
+			r.advance(1) // Straight
 			continue
 
 		case syntax.Branchmark | syntax.Back2:
-			r.trackPop()
+			if slot := r.memoSlot(); slot >= 0 {
+				r.trackPopN(2)
+				if pos := r.trackPeekN(1); pos >= 0 {
+					r.memo.markFailed(slot, pos)
+				}
+			} else {
+				r.trackPop()
+			}
 			r.stackPush(r.trackPeek()) // Recall old mark
 			// Backtrack
 
@@ -2491,6 +2529,19 @@ func (r *Runner) MatchIndex(cap int) int {
 // requiredStartBound narrows maxStartExclusive using the pattern's required
 // runes. ok is false when no match can start at or after start.
 func requiredStartBound(code *syntax.Code, text []rune, start, maxStartExclusive int) (bound int, ok bool) {
+	limit := requiredStartLimit(code, text, start)
+	if limit < 0 {
+		return 0, false
+	}
+	if maxStartExclusive < 0 || limit < maxStartExclusive {
+		return limit, true
+	}
+	return maxStartExclusive, true
+}
+
+// requiredStartLimit returns a position at or after which no match starting at
+// or after start can begin, or -1 when no such match is possible.
+func requiredStartLimit(code *syntax.Code, text []rune, start int) int {
 	last := len(text)
 	if code.RequiredRunes != nil {
 		last = code.RequiredRunes.LastIndex(text, start)
@@ -2499,10 +2550,7 @@ func requiredStartBound(code *syntax.Code, text []rune, start, maxStartExclusive
 		last = min(last, code.RequiredBranches.LastIndex(text, start))
 	}
 	if last < 0 {
-		return 0, false
+		return -1
 	}
-	if maxStartExclusive < 0 || last+1 < maxStartExclusive {
-		return last + 1, true
-	}
-	return maxStartExclusive, true
+	return last + 1
 }
